@@ -45,6 +45,7 @@ import {
   LogOut,
   LogIn,
   Sparkles,
+  Bell,
 } from "lucide-react";
 import {
   db,
@@ -128,18 +129,117 @@ function Modal({
     </dialog>
   );
 }
+function playIosChime() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.38);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+  } catch {}
+}
+
+export interface IosToastData {
+  title?: string;
+  message: string;
+  time?: string;
+  type?: "info" | "success" | "warning" | "payment";
+}
+
+function IosNotificationBanner({
+  toast,
+  onClose,
+}: {
+  toast: IosToastData;
+  onClose: () => void;
+}) {
+  const [dismissing, setDismissing] = useState(false);
+  const startY = useRef(0);
+
+  useEffect(() => {
+    playIosChime();
+    if ("vibrate" in navigator) {
+      try {
+        navigator.vibrate?.([30, 40, 30]);
+      } catch {}
+    }
+  }, []);
+
+  const handleDismiss = () => {
+    setDismissing(true);
+    setTimeout(onClose, 250);
+  };
+
+  return (
+    <div
+      className={`ios-banner ${dismissing ? "is-dismissing" : ""}`}
+      role="status"
+      onTouchStart={(e) => {
+        startY.current = e.touches[0].clientY;
+      }}
+      onTouchMove={(e) => {
+        if (startY.current - e.touches[0].clientY > 25) {
+          handleDismiss();
+        }
+      }}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest(".ios-banner-close")) return;
+        handleDismiss();
+      }}
+    >
+      <div className="ios-banner-header">
+        <div className="ios-banner-app">
+          <div className="ios-banner-icon">
+            <BrandMark />
+          </div>
+          <span className="ios-banner-title">{toast.title || "CLARA · FINANZAS"}</span>
+        </div>
+        <div className="ios-banner-meta">
+          <span className="ios-banner-time">{toast.time || "ahora"}</span>
+          <button
+            type="button"
+            className="ios-banner-close"
+            aria-label="Cerrar aviso"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDismiss();
+            }}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      </div>
+      <div className="ios-banner-body">
+        <p className="ios-banner-message">{toast.message}</p>
+      </div>
+      <div className="ios-banner-handle" />
+    </div>
+  );
+}
+
 function LoginScreen({
   onLoginWithGoogle,
   onContinueAsGuest,
   busy,
   online,
   toast,
+  onDismissToast,
 }: {
   onLoginWithGoogle: () => void;
   onContinueAsGuest: () => void;
   busy: boolean;
   online: boolean;
-  toast?: string;
+  toast?: IosToastData | null;
+  onDismissToast?: () => void;
 }) {
   return (
     <div className="login-screen-wrap">
@@ -222,12 +322,10 @@ function LoginScreen({
         </p>
 
         {toast && (
-          <p
-            role="alert"
-            style={{ marginTop: "14px", fontSize: "13px", color: "#f87171" }}
-          >
-            {toast}
-          </p>
+          <IosNotificationBanner
+            toast={toast}
+            onClose={onDismissToast || (() => {})}
+          />
         )}
       </div>
     </div>
@@ -428,7 +526,13 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("Inicio"),
     [date, setDate] = useState(today()),
     [online, setOnline] = useState(navigator.onLine),
-    [toast, setToast] = useState(""),
+    [toast, setToast] = useState<IosToastData | null>(null),
+    [notificationPermission, setNotificationPermission] = useState<string>(
+      () =>
+        typeof window !== "undefined" && "Notification" in window
+          ? Notification.permission
+          : "default",
+    ),
     [settings, setSettings] = useState(false),
     [form, setForm] = useState<{
       kind: Kind;
@@ -527,7 +631,26 @@ export default function App() {
     debts = live.filter((e) => e.kind === "debt"),
     accounts = live.filter((e) => e.kind === "account");
   const fmt = (n: number) => (prefs.hidden ? "$ ••••••" : money(n));
-  const notify = (message: string) => setToast(message);
+  const notify = (
+    message: string,
+    title?: string,
+    type?: "info" | "success" | "warning" | "payment",
+  ) => {
+    setToast({
+      title: title || "CLARA · FINANZAS",
+      message,
+      time: "ahora",
+      type: type || "info",
+    });
+    if ("Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification(title || "Clara · Finanzas", {
+          body: message,
+          icon: "/icon-192.png",
+        });
+      } catch {}
+    }
+  };
   const run = async (action: () => Promise<unknown>, message?: string) => {
     try {
       await action();
@@ -661,7 +784,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (toast) {
-      const t = setTimeout(() => setToast(""), 5000);
+      const t = setTimeout(() => setToast(null), 5000);
       return () => clearTimeout(t);
     }
   }, [toast]);
@@ -836,7 +959,12 @@ export default function App() {
         >
           <LockKeyhole size={18} /> Desbloquear
         </button>
-        {toast && <p role="alert">{toast}</p>}
+        {toast && (
+          <IosNotificationBanner
+            toast={toast}
+            onClose={() => setToast(null)}
+          />
+        )}
       </div>
     );
   if (authChecking) {
@@ -872,6 +1000,7 @@ export default function App() {
         busy={busy}
         online={online}
         toast={toast}
+        onDismissToast={() => setToast(null)}
       />
     );
   }
@@ -1667,13 +1796,10 @@ export default function App() {
       </main>
       {nav(true)}
       {toast && (
-        <div className="toast" role="status">
-          <Check size={18} />
-          {toast}
-          <button aria-label="Cerrar aviso" onClick={() => setToast("")}>
-            <X size={16} />
-          </button>
-        </div>
+        <IosNotificationBanner
+          toast={toast}
+          onClose={() => setToast(null)}
+        />
       )}
       {form && (
         <Modal
@@ -1774,7 +1900,7 @@ export default function App() {
         <Modal title="Configuración" onClose={() => setSettings(false)}>
           {toast && (
             <p className="inline-notice" role="status">
-              {toast}
+              {toast.message}
             </p>
           )}
 
@@ -2013,6 +2139,64 @@ export default function App() {
               <RefreshCw size={16} className={checkingUpdate ? "spin" : ""} />
               {checkingUpdate ? "Buscando actualizaciones…" : "Buscar actualizaciones"}
             </button>
+          </div>
+          <hr />
+          <div style={{ margin: "16px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <Bell size={16} style={{ color: "var(--accent, #38bdf8)" }} />
+                Notificaciones estilo iOS
+              </h3>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: notificationPermission === "granted" ? "#4ade80" : "var(--muted, #94a3b8)",
+                  background: notificationPermission === "granted" ? "rgba(74, 222, 128, 0.1)" : "rgba(255, 255, 255, 0.06)",
+                  padding: "2px 8px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                }}
+              >
+                {notificationPermission === "granted" ? "Activas" : "En pantalla"}
+              </span>
+            </div>
+            <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
+              Avisos flotantes estilo iPhone con sonido sutil y háptico para pagos fijos, recordatorios y confirmaciones.
+            </p>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {notificationPermission !== "granted" && (
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ flex: 1, fontSize: "13px" }}
+                  onClick={async () => {
+                    if ("Notification" in window) {
+                      const res = await Notification.requestPermission();
+                      setNotificationPermission(res);
+                      if (res === "granted") {
+                        notify("Notificaciones del sistema activadas correctamente.", "NOTIFICACIONES", "success");
+                      }
+                    }
+                  }}
+                >
+                  <Bell size={14} /> Activar en sistema
+                </button>
+              )}
+              <button
+                type="button"
+                className="secondary"
+                style={{ flex: 1, fontSize: "13px" }}
+                onClick={() => {
+                  notify(
+                    "📅 Pago próximo: Internet Telmex ($550.00 MXN) vence en 2 días.",
+                    "RECORDATORIO DE PAGO",
+                    "payment",
+                  );
+                }}
+              >
+                <Sparkles size={14} /> Probar aviso iOS
+              </button>
+            </div>
           </div>
           <hr />
           <div style={{ margin: "16px 0" }}>

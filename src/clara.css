@@ -1758,4 +1758,137 @@ button:active:not(:disabled),
   line-height: 1.4;
 }
 
+/* ==========================================================================
+   iOS Style Notification Banner
+   ========================================================================== */
+.ios-banner {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 24px);
+  max-width: 410px;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 24px;
+  padding: 12px 16px 8px 16px;
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.45),
+    0 16px 40px -4px rgba(0, 0, 0, 0.65),
+    0 4px 12px rgba(0, 0, 0, 0.35);
+  z-index: 99999;
+  user-select: none;
+  cursor: pointer;
+  animation: ios-banner-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+}
+
+@keyframes ios-banner-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -45px) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+.ios-banner.is-dismissing {
+  opacity: 0;
+  transform: translate(-50%, -45px) scale(0.92);
+  pointer-events: none;
+}
+
+.ios-banner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.ios-banner-app {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ios-banner-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.ios-banner-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ios-banner-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.ios-banner-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ios-banner-time {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.ios-banner-close {
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ios-banner-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.ios-banner-body {
+  padding-left: 2px;
+}
+
+.ios-banner-message {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #f8fafc;
+}
+
+.ios-banner-handle {
+  width: 38px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  margin: 8px auto 2px auto;
+}
+
 
