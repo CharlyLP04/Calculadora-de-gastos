@@ -4,6 +4,9 @@ import {
   collection,
   doc,
   getDocs,
+  getDoc,
+  setDoc,
+  deleteDoc,
   writeBatch,
   onSnapshot,
   type Firestore,
@@ -26,7 +29,7 @@ const DEFAULT_FIREBASE_CONFIG: FirebaseOptions = {
   measurementId: "G-459TG230FE",
 };
 
-export function resolveSyncKey(prefs?: Prefs): string {
+export function resolveSyncKey(prefs?: Prefs): string | null {
   if (firebaseApp) {
     try {
       const user = getAuth(firebaseApp).currentUser;
@@ -34,12 +37,7 @@ export function resolveSyncKey(prefs?: Prefs): string {
     } catch {}
   }
   if (prefs?.syncToken?.trim()) return prefs.syncToken.trim();
-  let deviceId = localStorage.getItem("clara_device_sync_id");
-  if (!deviceId) {
-    deviceId = "dev_" + Math.random().toString(36).substring(2, 12);
-    localStorage.setItem("clara_device_sync_id", deviceId);
-  }
-  return deviceId;
+  return null;
 }
 
 function getEnvConfig(): FirebaseOptions | null {
@@ -130,13 +128,43 @@ export function isFirebaseConfigured(prefs?: Prefs): boolean {
 }
 
 export async function syncWithFirestore(prefs?: Prefs): Promise<number> {
+  const syncKey = resolveSyncKey(prefs);
+  if (!syncKey) {
+    // No user authenticated or valid sync token; do not sync
+    return 0;
+  }
+
   const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
   if (!firestore) {
     throw new Error("Google Firebase no está configurado todavía.");
   }
 
-  const syncKey = resolveSyncKey(prefs);
   const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
+
+  // Sync user preferences (budget, categories) with user document in Firestore
+  try {
+    const userDocRef = doc(firestore, "clara_users", syncKey);
+    const userDocSnap = await getDoc(userDocRef);
+    if (userDocSnap.exists()) {
+      const cloudData = userDocSnap.data();
+      if (cloudData) {
+        const updatePayload: Partial<Prefs> = {};
+        if (typeof cloudData.budget === "number") updatePayload.budget = cloudData.budget;
+        if (Array.isArray(cloudData.customCategories)) updatePayload.customCategories = cloudData.customCategories;
+        if (Object.keys(updatePayload).length > 0) {
+          await db.prefs.update("main", updatePayload);
+        }
+      }
+    } else if (prefs) {
+      await setDoc(userDocRef, {
+        budget: prefs.budget || 0,
+        customCategories: prefs.customCategories || [],
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
+  } catch (err) {
+    console.warn("No se pudieron sincronizar las preferencias de usuario:", err);
+  }
 
   const remoteSnapshot = await getDocs(entriesCol);
   const remoteEntries = new Map<string, Entry>();
@@ -205,10 +233,12 @@ export function setupFirestoreRealtime(prefs?: Prefs, onUpdated?: () => void): (
     unsubscribeSnapshot = null;
   }
 
+  const syncKey = resolveSyncKey(prefs);
+  if (!syncKey) return () => {};
+
   const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
   if (!firestore) return () => {};
 
-  const syncKey = resolveSyncKey(prefs);
   const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
 
   unsubscribeSnapshot = onSnapshot(entriesCol, async (snapshot) => {
@@ -240,24 +270,32 @@ export function setupFirestoreRealtime(prefs?: Prefs, onUpdated?: () => void): (
 }
 
 export async function clearCloudEntries(prefs?: Prefs): Promise<number> {
+  const syncKey = resolveSyncKey(prefs);
+  if (!syncKey) return 0;
+
   const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
   if (!firestore) return 0;
 
-  const syncKey = resolveSyncKey(prefs);
   const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
 
   const snapshot = await getDocs(entriesCol);
-  if (snapshot.empty) return 0;
-
-  const batchSize = 400;
   const docs = snapshot.docs;
-  for (let i = 0; i < docs.length; i += batchSize) {
-    const chunk = docs.slice(i, i + batchSize);
-    const batch = writeBatch(firestore);
-    for (const d of chunk) {
-      batch.delete(d.ref);
+  if (!snapshot.empty) {
+    const batchSize = 400;
+    for (let i = 0; i < docs.length; i += batchSize) {
+      const chunk = docs.slice(i, i + batchSize);
+      const batch = writeBatch(firestore);
+      for (const d of chunk) {
+        batch.delete(d.ref);
+      }
+      await batch.commit();
     }
-    await batch.commit();
   }
+
+  // Delete user prefs doc as well
+  try {
+    await deleteDoc(doc(firestore, "clara_users", syncKey));
+  } catch {}
+
   return docs.length;
 }

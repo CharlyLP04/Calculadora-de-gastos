@@ -449,12 +449,27 @@ export default function App() {
   const dateStripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    return subscribeToAuth((user) => {
+    return subscribeToAuth(async (user) => {
       setCurrentUser(user);
       if (user) {
         setIsGuest(false);
         localStorage.setItem("clara_guest_mode", "false");
+        const prevUid = localStorage.getItem("clara_current_uid");
+        if (prevUid && prevUid !== "guest" && prevUid !== user.uid) {
+          // Switched to a different Google account: clear local database to prevent cross-contamination
+          await db.entries.clear();
+          await db.prefs.put({ ...defaults, id: "main" });
+        }
+        localStorage.setItem("clara_current_uid", user.uid);
         void syncData(prefs).catch(() => {});
+      } else {
+        // User logged out
+        const prevUid = localStorage.getItem("clara_current_uid");
+        if (prevUid && prevUid !== "guest") {
+          await db.entries.clear();
+          await db.prefs.put({ ...defaults, id: "main" });
+          localStorage.removeItem("clara_current_uid");
+        }
       }
       setAuthChecking(false);
     });
@@ -477,8 +492,24 @@ export default function App() {
       );
     }
   };
-  const savePrefs = async (change: Partial<Prefs>) =>
-    db.prefs.put({ ...prefs, ...change });
+  const savePrefs = async (change: Partial<Prefs>) => {
+    await db.prefs.put({ ...prefs, ...change });
+    if (currentUser) {
+      import("./firebase")
+        .then(async ({ getFirebaseApp }) => {
+          const { getFirestore, doc, setDoc } = await import("firebase/firestore");
+          const app = getFirebaseApp();
+          if (app) {
+            const firestore = getFirestore(app);
+            const updatePayload: Record<string, any> = { updatedAt: new Date().toISOString() };
+            if (change.budget !== undefined) updatePayload.budget = change.budget;
+            if (change.customCategories !== undefined) updatePayload.customCategories = change.customCategories;
+            await setDoc(doc(firestore, "clara_users", currentUser.uid), updatePayload, { merge: true }).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
+  };
   const availableCategories = getCategories(prefs);
   const handleAddCategory = async (name: string) => {
     const trimmed = name.trim();
@@ -508,9 +539,12 @@ export default function App() {
     setBusy(true);
     try {
       await logoutUser();
+      await db.entries.clear();
+      await db.prefs.put({ ...defaults, id: "main" });
+      localStorage.removeItem("clara_current_uid");
+      localStorage.removeItem("clara_guest_mode");
       setCurrentUser(null);
       setIsGuest(false);
-      localStorage.removeItem("clara_guest_mode");
       setSettings(false);
       notify("Sesión cerrada correctamente.");
     } catch (e) {
@@ -535,6 +569,7 @@ export default function App() {
       setCurrentUser(null);
       setIsGuest(false);
       localStorage.removeItem("clara_guest_mode");
+      localStorage.removeItem("clara_current_uid");
       localStorage.removeItem("clara_device_sync_id");
       setSettings(false);
       notify("Todos los datos han sido restablecidos desde cero.");
@@ -585,12 +620,13 @@ export default function App() {
     }
   }, [toast]);
   const canSync = Boolean(
-    (prefs.syncUrl && prefs.syncToken) ||
-      prefs.firebaseConfig ||
-      localStorage.getItem("clara_firebase_config") ||
-      import.meta.env.VITE_FIREBASE_CONFIG ||
-      (import.meta.env.VITE_FIREBASE_API_KEY &&
-        import.meta.env.VITE_FIREBASE_PROJECT_ID),
+    currentUser &&
+      online &&
+      (prefs.firebaseConfig ||
+        localStorage.getItem("clara_firebase_config") ||
+        import.meta.env.VITE_FIREBASE_CONFIG ||
+        (import.meta.env.VITE_FIREBASE_API_KEY &&
+          import.meta.env.VITE_FIREBASE_PROJECT_ID)),
   );
   useEffect(() => {
     if (!online || !canSync || locked) return;
@@ -610,7 +646,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [online, canSync, prefs, locked]);
   useEffect(() => {
-    if (!online || locked) return;
+    if (!online || locked || !currentUser) return;
     let cleanup: (() => void) | undefined;
     import("./firebase")
       .then(({ isFirebaseConfigured, setupFirestoreRealtime }) => {
@@ -622,7 +658,7 @@ export default function App() {
     return () => {
       if (cleanup) cleanup();
     };
-  }, [online, prefs.firebaseConfig, prefs.syncToken, locked]);
+  }, [online, prefs.firebaseConfig, prefs.syncToken, locked, currentUser]);
   const changeMonth = (value: string) => {
     if (/^\d{4}-\d{2}$/.test(value)) setDate(value + "-01");
   };
@@ -784,6 +820,7 @@ export default function App() {
         onContinueAsGuest={() => {
           setIsGuest(true);
           localStorage.setItem("clara_guest_mode", "true");
+          localStorage.setItem("clara_current_uid", "guest");
           notify("Modo local activado: tus datos se guardarán en este equipo.");
         }}
         busy={busy}
@@ -851,7 +888,7 @@ export default function App() {
                 style={{ marginLeft: "auto", flexShrink: 0, color: "#ef4444" }}
                 onClick={() => {
                   if (confirm("¿Cerrar sesión de Google?")) {
-                    void run(() => logoutUser(), "Sesión cerrada");
+                    void handleLogout();
                   }
                 }}
               >
@@ -901,7 +938,7 @@ export default function App() {
                 title={`Sesión de ${currentUser.email}. Toca para cerrar sesión.`}
                 onClick={() => {
                   if (confirm(`¿Cerrar sesión de Google (${currentUser.email})?`)) {
-                    void run(() => logoutUser(), "Sesión cerrada");
+                    void handleLogout();
                   }
                 }}
               >
