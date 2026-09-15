@@ -560,13 +560,22 @@ main {
   overflow-x: auto;
   gap: 12px;
   padding: 8px 4px 14px 4px;
-  scroll-behavior: smooth;
   cursor: grab;
   user-select: none;
+  -webkit-user-select: none;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-x;
+  touch-action: pan-y;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  scroll-snap-type: x proximity;
+}
+.date-strip.is-dragging {
+  cursor: grabbing !important;
+  scroll-behavior: auto !important;
+  scroll-snap-type: none !important;
+}
+.date-strip.is-dragging button {
+  pointer-events: none;
 }
 .date-strip:active {
   cursor: grabbing;
@@ -591,6 +600,9 @@ main {
   border-color: #ffffff10;
   border-radius: 20px;
   user-select: none;
+  scroll-snap-align: center;
+  flex-shrink: 0;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
 .date-strip button.selected {
   background: #bed8e923;

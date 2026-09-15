@@ -251,6 +251,17 @@ function DateStrip({
   const startX = useRef(0);
   const scrollLeftStart = useRef(0);
   const hasDragged = useRef(false);
+  const lastX = useRef(0);
+  const lastTime = useRef(0);
+  const velocity = useRef(0);
+  const momentumRaf = useRef<number | null>(null);
+
+  const stopMomentum = () => {
+    if (momentumRaf.current !== null) {
+      cancelAnimationFrame(momentumRaf.current);
+      momentumRaf.current = null;
+    }
+  };
 
   // Auto-center selected date when date or month changes
   useEffect(() => {
@@ -276,40 +287,88 @@ function DateStrip({
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) > Math.abs(e.deltaX) || e.deltaY !== 0) {
         e.preventDefault();
-        el.scrollLeft += e.deltaY;
+        stopMomentum();
+        el.scrollBy({ left: e.deltaY * 1.3, behavior: "smooth" });
       }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [dateStripRef]);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = dateStripRef.current;
     if (!el) return;
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+
+    stopMomentum();
     isDragging.current = true;
     hasDragged.current = false;
-    startX.current = e.pageX - el.offsetLeft;
+    startX.current = e.clientX;
+    lastX.current = e.clientX;
+    lastTime.current = performance.now();
+    velocity.current = 0;
     scrollLeftStart.current = el.scrollLeft;
-    el.style.cursor = "grabbing";
+
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    el.classList.add("is-dragging");
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = dateStripRef.current;
     if (!isDragging.current || !el) return;
-    e.preventDefault();
-    const x = e.pageX - el.offsetLeft;
-    const walk = (x - startX.current) * 1.5;
-    if (Math.abs(walk) > 5) {
+
+    const now = performance.now();
+    const dt = Math.max(1, now - lastTime.current);
+    const dx = e.clientX - lastX.current;
+
+    velocity.current = dx / dt;
+    lastX.current = e.clientX;
+    lastTime.current = now;
+
+    const totalWalk = e.clientX - startX.current;
+    if (Math.abs(totalWalk) > 5) {
       hasDragged.current = true;
     }
-    el.scrollLeft = scrollLeftStart.current - walk;
+
+    el.scrollLeft = scrollLeftStart.current - totalWalk;
   };
 
-  const handleMouseUpOrLeave = () => {
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging.current) return;
     isDragging.current = false;
     const el = dateStripRef.current;
-    if (el) {
-      el.style.cursor = "grab";
+    if (!el) return;
+
+    try {
+      if (el.hasPointerCapture(e.pointerId)) {
+        el.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+
+    el.classList.remove("is-dragging");
+
+    // Carousel inertia / momentum glide
+    let v = velocity.current * 16;
+    if (Math.abs(v) > 40) v = Math.sign(v) * 40;
+
+    if (Math.abs(v) > 1.2) {
+      const stepGlide = () => {
+        if (!dateStripRef.current) return;
+        dateStripRef.current.scrollLeft -= v;
+        v *= 0.93; // carousel deceleration
+        if (Math.abs(v) > 0.6) {
+          momentumRaf.current = requestAnimationFrame(stepGlide);
+        } else {
+          momentumRaf.current = null;
+        }
+      };
+      momentumRaf.current = requestAnimationFrame(stepGlide);
     }
   };
 
@@ -319,10 +378,10 @@ function DateStrip({
     <div
       ref={dateStripRef}
       className="date-strip"
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUpOrLeave}
-      onMouseLeave={handleMouseUpOrLeave}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
     >
       {Array.from({ length: daysCount }, (_, i) => {
         const day = month + "-" + String(i + 1).padStart(2, "0");
@@ -1759,9 +1818,9 @@ export default function App() {
                 () =>
                   savePrefs({
                     budget: Number(f.get("budget")),
-                    syncUrl: String(f.get("syncUrl") || "").trim(),
-                    syncToken: String(f.get("syncToken") || "").trim(),
-                    firebaseConfig: String(f.get("firebaseConfig") || "").trim(),
+                    syncUrl: prefs.syncUrl || "",
+                    syncToken: prefs.syncToken || "",
+                    firebaseConfig: prefs.firebaseConfig || "",
                   }),
                 "Configuración guardada",
               );
@@ -1783,38 +1842,6 @@ export default function App() {
               El límite diario reparte lo disponible después de reservar fijos y
               cuotas.
             </p>
-
-              <details style={{ marginTop: "16px" }}>
-                <summary
-                  style={{
-                    cursor: "pointer",
-                    color: "rgba(255, 255, 255, 0.6)",
-                    fontSize: "0.82rem",
-                  }}
-                >
-                  Avanzado: Servidor propio o clave manual
-                </summary>
-                <div style={{ marginTop: "10px" }}>
-                  <label>
-                    Clave / Identificador personalizado
-                    <input
-                      name="syncToken"
-                      type="text"
-                      placeholder="Identificador opcional"
-                      defaultValue={prefs.syncToken}
-                    />
-                  </label>
-                  <label>
-                    Dirección de servidor propio (Node.js / Express)
-                    <input
-                      name="syncUrl"
-                      type="url"
-                      placeholder="https://tu-servidor.com"
-                      defaultValue={prefs.syncUrl}
-                    />
-                  </label>
-                </div>
-              </details>
 
             <button className="primary full" type="submit">
               <Check size={16} /> Guardar configuración
