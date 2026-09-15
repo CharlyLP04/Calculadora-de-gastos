@@ -730,25 +730,36 @@ export default function App() {
   const handleWipeAllData = async () => {
     if (
       !confirm(
-        "⚠️ ¿Estás seguro de restablecer desde cero?\n\nEsta acción borrará permanentemente todos tus movimientos, gastos fijos, cuentas, deudas y configuraciones tanto de este equipo como de la nube.\n\nEsta acción NO se puede deshacer.",
+        "⚠️ ¿Estás seguro de restablecer desde cero?\n\nEsta acción borrará permanentemente todos tus movimientos, gastos fijos, cuentas, deudas y configuraciones tanto de este equipo como de tu cuenta en la nube de Google.\n\nEsta acción NO se puede deshacer.",
       )
     ) {
       return;
     }
     setBusy(true);
     try {
-      await clearCloudEntries(prefs).catch(() => {});
+      const targetUid =
+        currentUser?.uid ||
+        (typeof localStorage !== "undefined"
+          ? localStorage.getItem("clara_current_uid")
+          : null);
+
+      if (targetUid && targetUid !== "guest") {
+        await clearCloudEntries(targetUid, prefs);
+      }
       await wipeAllData();
-      await logoutUser().catch(() => {});
-      setCurrentUser(null);
-      setIsGuest(false);
-      localStorage.removeItem("clara_guest_mode");
-      localStorage.removeItem("clara_current_uid");
-      localStorage.removeItem("clara_device_sync_id");
       setSettings(false);
-      notify("Todos los datos han sido restablecidos desde cero.");
+      notify(
+        "Todos los datos han sido borrados de tu cuenta y restablecidos a $0.00.",
+        "DATOS RESTABLECIDOS",
+        "success",
+      );
     } catch (e) {
-      notify(e instanceof Error ? e.message : "Error al restablecer datos.");
+      console.error("Error al restablecer datos:", e);
+      notify(
+        e instanceof Error ? e.message : "Error al restablecer datos.",
+        "ERROR",
+        "warning",
+      );
     } finally {
       setBusy(false);
     }
@@ -2082,30 +2093,54 @@ export default function App() {
               <Check size={16} /> Guardar configuración
             </button>
           </form>
-          <button
-            className="secondary full"
-            disabled={busy || !online}
-            onClick={() => {
-              setBusy(true);
-              void run(async () => {
-                const count = await syncData(prefs);
-                notify(
-                  typeof count === "number" && count > 0
-                    ? `Sincronizados ${count} registros con Firebase`
-                    : "Sincronización completada: tus datos están al día en la nube.",
-                );
-              }).finally(() => setBusy(false));
-            }}
-          >
-            <RefreshCw size={16} className={busy ? "spin" : ""} />
-            {busy ? "Sincronizando…" : "Sincronizar ahora con la nube"}
-          </button>
-          {prefs.lastSync && (
-            <p className="field-help">
-              Última sincronización:{" "}
-              {new Date(prefs.lastSync).toLocaleString("es-MX")}
+          <hr />
+          <div style={{ margin: "16px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <Cloud size={16} style={{ color: "var(--accent, #38bdf8)" }} />
+                Sincronización en la Nube
+              </h3>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: currentUser ? "#4ade80" : "var(--muted, #94a3b8)",
+                  background: currentUser ? "rgba(74, 222, 128, 0.1)" : "rgba(255, 255, 255, 0.06)",
+                  padding: "2px 8px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                }}
+              >
+                {currentUser ? "Automática activa" : "Modo local"}
+              </span>
+            </div>
+            <p className="field-help" style={{ marginTop: 0, marginBottom: "10px" }}>
+              Clara sincroniza automáticamente tus movimientos en segundo plano. Usa este botón para forzar la sincronización manual de inmediato con los servidores de Google Firebase.
             </p>
-          )}
+            <button
+              className="secondary full"
+              disabled={busy || !online}
+              onClick={() => {
+                setBusy(true);
+                void run(async () => {
+                  const count = await syncData(prefs);
+                  notify(
+                    typeof count === "number" && count > 0
+                      ? `Sincronizados ${count} registros con Firebase`
+                      : "Sincronización completada: tus datos están al día en la nube.",
+                  );
+                }).finally(() => setBusy(false));
+              }}
+            >
+              <RefreshCw size={16} className={busy ? "spin" : ""} />
+              {busy ? "Sincronizando…" : "Sincronizar ahora con la nube"}
+            </button>
+            {prefs.lastSync && (
+              <p className="field-help" style={{ marginTop: "6px" }}>
+                Última sincronización:{" "}
+                {new Date(prefs.lastSync).toLocaleString("es-MX")}
+              </p>
+            )}
+          </div>
           <hr />
           <div style={{ margin: "16px 0" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
@@ -2492,7 +2527,7 @@ export default function App() {
               <Trash2 size={18} /> Restablecer desde cero
             </h3>
             <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
-              Elimina de forma definitiva todos los gastos, ingresos, cuentas, gastos fijos y deudas guardados en este dispositivo y en la nube.
+              Elimina de forma definitiva todos los movimientos, gastos fijos, cuentas y deudas de este dispositivo y de la nube de Google para dejar tu cuenta totalmente en $0.00.
             </p>
             <button
               type="button"
@@ -2514,7 +2549,7 @@ export default function App() {
               disabled={busy}
               onClick={handleWipeAllData}
             >
-              <Trash2 size={16} /> Restablecer y borrar datos de la cuenta
+              <Trash2 size={16} /> {busy ? "Borrando registros…" : "Restablecer y borrar datos de la cuenta"}
             </button>
           </div>
         </Modal>

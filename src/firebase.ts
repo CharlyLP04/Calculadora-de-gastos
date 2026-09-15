@@ -29,13 +29,26 @@ const DEFAULT_FIREBASE_CONFIG: FirebaseOptions = {
   measurementId: "G-459TG230FE",
 };
 
-export function resolveSyncKey(prefs?: Prefs): string | null {
-  if (firebaseApp) {
+export function resolveSyncKey(prefs?: Prefs, targetUid?: string | null): string | null {
+  if (targetUid && targetUid.trim() && targetUid !== "guest") {
+    return targetUid.trim();
+  }
+
+  const app = getFirebaseApp(prefs ? getStoredFirebaseConfig(prefs) : null);
+  if (app) {
     try {
-      const user = getAuth(firebaseApp).currentUser;
+      const user = getAuth(app).currentUser;
       if (user?.uid) return user.uid;
     } catch {}
   }
+
+  if (typeof localStorage !== "undefined") {
+    const stored = localStorage.getItem("clara_current_uid");
+    if (stored && stored !== "guest" && stored !== "null") {
+      return stored;
+    }
+  }
+
   if (prefs?.syncToken?.trim()) return prefs.syncToken.trim();
   return null;
 }
@@ -269,15 +282,30 @@ export function setupFirestoreRealtime(prefs?: Prefs, onUpdated?: () => void): (
   };
 }
 
-export async function clearCloudEntries(prefs?: Prefs): Promise<number> {
-  const syncKey = resolveSyncKey(prefs);
-  if (!syncKey) return 0;
+export async function clearCloudEntries(
+  targetUidOrPrefs?: string | null | Prefs,
+  optionalPrefs?: Prefs,
+): Promise<number> {
+  const targetUid = typeof targetUidOrPrefs === "string" ? targetUidOrPrefs : null;
+  const prefs = typeof targetUidOrPrefs === "object" && targetUidOrPrefs !== null ? targetUidOrPrefs : optionalPrefs;
+
+  const syncKey = resolveSyncKey(prefs, targetUid);
+  if (!syncKey) {
+    console.warn("clearCloudEntries: No se encontró identificador de usuario para borrar.");
+    return 0;
+  }
 
   const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
-  if (!firestore) return 0;
+  if (!firestore) {
+    throw new Error("No se pudo conectar a Firebase Firestore.");
+  }
+
+  if (unsubscribeSnapshot) {
+    unsubscribeSnapshot();
+    unsubscribeSnapshot = null;
+  }
 
   const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
-
   const snapshot = await getDocs(entriesCol);
   const docs = snapshot.docs;
   if (!snapshot.empty) {
@@ -295,7 +323,9 @@ export async function clearCloudEntries(prefs?: Prefs): Promise<number> {
   // Delete user prefs doc as well
   try {
     await deleteDoc(doc(firestore, "clara_users", syncKey));
-  } catch {}
+  } catch (e) {
+    console.warn("No se pudo borrar documento principal de usuario:", e);
+  }
 
   return docs.length;
 }
