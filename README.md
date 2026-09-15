@@ -99,4 +99,3 @@ En entornos Windows que impiden crear subprocesos se incluyen alternativas de co
 El rediseño simplifica la jerarquía, elimina frases y paneles decorativos y añade un monograma C vectorial. La tarjeta de balance usa vidrio perlado; la navegación y los diálogos usan transparencias con desenfoque mediante `backdrop-filter` y `-webkit-backdrop-filter`. Hay alternativas opacas para navegadores sin soporte y preferencias de transparencia reducida. Los botones respetan tamaños táctiles y los campos mantienen un mínimo de 16 px.
 
 El acabado es una implementación web inspirada en Liquid Glass, no un componente nativo de Apple. La revisión se realiza en navegador con tamaños móviles; queda pendiente validar visualmente en dispositivos iOS y Android físicos. Los identificadores internos de la base de datos y credenciales conservan su nombre original para preservar registros existentes al actualizar.
-
