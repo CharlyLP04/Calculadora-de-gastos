@@ -44,6 +44,7 @@ import {
   Delete,
   LogOut,
   LogIn,
+  Sparkles,
 } from "lucide-react";
 import {
   db,
@@ -445,8 +446,53 @@ export default function App() {
     [isGuest, setIsGuest] = useState<boolean>(
       () => localStorage.getItem("clara_guest_mode") === "true",
     ),
-    [authChecking, setAuthChecking] = useState(true);
+    [authChecking, setAuthChecking] = useState(true),
+    [checkingUpdate, setCheckingUpdate] = useState(false);
   const dateStripRef = useRef<HTMLDivElement>(null);
+
+  const handleCheckUpdate = async () => {
+    if (!online) {
+      notify("Estás sin conexión a internet.");
+      return;
+    }
+    setCheckingUpdate(true);
+    try {
+      if ("serviceWorker" in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          await reg.update();
+
+          if (reg.waiting) {
+            notify("¡Nueva versión lista! Actualizando aplicación…");
+            window.dispatchEvent(new Event("pwa-apply-update"));
+            return;
+          }
+
+          if (reg.installing) {
+            notify("Descargando actualización en segundo plano…");
+            reg.installing.addEventListener("statechange", function () {
+              if (this.state === "installed") {
+                window.dispatchEvent(new Event("pwa-apply-update"));
+              }
+            });
+            return;
+          }
+        }
+      }
+
+      try {
+        await fetch(`/?_t=${Date.now()}`, { method: "HEAD", cache: "no-store" });
+      } catch {}
+
+      await new Promise((r) => setTimeout(r, 650));
+      notify("✅ Tienes la versión más reciente de Clara.");
+    } catch (e) {
+      console.warn("Error al buscar actualizaciones:", e);
+      notify("✅ Tu aplicación está al día.");
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
   useEffect(() => {
     return subscribeToAuth(async (user) => {
@@ -850,6 +896,27 @@ export default function App() {
         <div className="sidebar-bottom">
           <button className="settings-link" onClick={() => setSettings(true)}>
             <Settings size={18} /> Configuración <ArrowRight size={16} />
+          </button>
+          <button
+            type="button"
+            className="text-button"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              fontSize: "12px",
+              color: "var(--muted, #94a3b8)",
+              padding: "4px 8px",
+              margin: "2px 0 8px 0",
+              width: "100%",
+              textAlign: "left",
+            }}
+            onClick={handleCheckUpdate}
+            disabled={checkingUpdate || !online}
+            title="Buscar actualizaciones de la aplicación"
+          >
+            <RefreshCw size={13} className={checkingUpdate ? "spin" : ""} />
+            <span>{checkingUpdate ? "Buscando…" : "Buscar actualizaciones"}</span>
           </button>
           <div className="profile" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             {currentUser?.photoURL ? (
@@ -1908,6 +1975,45 @@ export default function App() {
               {new Date(prefs.lastSync).toLocaleString("es-MX")}
             </p>
           )}
+          <hr />
+          <div style={{ margin: "16px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <Sparkles size={16} style={{ color: "var(--accent, #38bdf8)" }} />
+                Versión y Actualizaciones
+              </h3>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "var(--muted, #94a3b8)",
+                  background: "rgba(255, 255, 255, 0.06)",
+                  padding: "2px 8px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                }}
+              >
+                v1.1.0 · Web
+              </span>
+            </div>
+            <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
+              Comprueba si hay una nueva versión o correcciones en la nube y actualiza al instante.
+            </p>
+            <button
+              type="button"
+              className="secondary full"
+              disabled={checkingUpdate || !online}
+              onClick={handleCheckUpdate}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+              }}
+            >
+              <RefreshCw size={16} className={checkingUpdate ? "spin" : ""} />
+              {checkingUpdate ? "Buscando actualizaciones…" : "Buscar actualizaciones"}
+            </button>
+          </div>
           <hr />
           <div style={{ margin: "16px 0" }}>
             <div className="section-row" style={{ marginBottom: "8px" }}>
