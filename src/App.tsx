@@ -232,6 +232,136 @@ function LoginScreen({
     </div>
   );
 }
+function DateStrip({
+  month,
+  date,
+  entries,
+  budget,
+  onSelectDate,
+  dateStripRef,
+}: {
+  month: string;
+  date: string;
+  entries: Entry[];
+  budget: number;
+  onSelectDate: (d: string) => void;
+  dateStripRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const scrollLeftStart = useRef(0);
+  const hasDragged = useRef(false);
+
+  // Auto-center selected date when date or month changes
+  useEffect(() => {
+    const el = dateStripRef.current;
+    if (!el) return;
+    const selected = el.querySelector(
+      `button[data-day="${date}"]`,
+    ) as HTMLElement | null;
+    if (selected) {
+      const targetLeft =
+        selected.offsetLeft -
+        el.offsetLeft -
+        el.clientWidth / 2 +
+        selected.clientWidth / 2;
+      el.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
+    }
+  }, [date, month, dateStripRef]);
+
+  // Convert mouse wheel vertically to horizontal scroll
+  useEffect(() => {
+    const el = dateStripRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX) || e.deltaY !== 0) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [dateStripRef]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const el = dateStripRef.current;
+    if (!el) return;
+    isDragging.current = true;
+    hasDragged.current = false;
+    startX.current = e.pageX - el.offsetLeft;
+    scrollLeftStart.current = el.scrollLeft;
+    el.style.cursor = "grabbing";
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const el = dateStripRef.current;
+    if (!isDragging.current || !el) return;
+    e.preventDefault();
+    const x = e.pageX - el.offsetLeft;
+    const walk = (x - startX.current) * 1.5;
+    if (Math.abs(walk) > 5) {
+      hasDragged.current = true;
+    }
+    el.scrollLeft = scrollLeftStart.current - walk;
+  };
+
+  const handleMouseUpOrLeave = () => {
+    isDragging.current = false;
+    const el = dateStripRef.current;
+    if (el) {
+      el.style.cursor = "grab";
+    }
+  };
+
+  const daysCount = daysInMonth(month);
+
+  return (
+    <div
+      ref={dateStripRef}
+      className="date-strip"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUpOrLeave}
+      onMouseLeave={handleMouseUpOrLeave}
+    >
+      {Array.from({ length: daysCount }, (_, i) => {
+        const day = month + "-" + String(i + 1).padStart(2, "0");
+        const ds = summarize(entries, month, day, budget);
+        const isSelected = day === date;
+
+        return (
+          <button
+            type="button"
+            data-day={day}
+            className={isSelected ? "selected" : ""}
+            key={day}
+            onClick={() => {
+              if (!hasDragged.current) {
+                onSelectDate(day);
+              }
+            }}
+          >
+            <span>
+              {new Date(day + "T12:00:00").toLocaleDateString("es-MX", {
+                weekday: "short",
+              })}
+            </span>
+            <strong>{String(i + 1).padStart(2, "0")}</strong>
+            <i
+              className={
+                ds.dayTx.length
+                  ? ds.dayExpense > ds.allowance
+                    ? "red-dot"
+                    : "green-dot"
+                  : ""
+              }
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 export default function App() {
   const entries = useLiveQuery(() => db.entries.toArray(), []) || [];
   const prefs = useLiveQuery(() => db.prefs.get("main"), []) || defaults;
@@ -257,6 +387,7 @@ export default function App() {
       () => localStorage.getItem("clara_guest_mode") === "true",
     ),
     [authChecking, setAuthChecking] = useState(true);
+  const dateStripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     return subscribeToAuth((user) => {
@@ -1026,57 +1157,57 @@ export default function App() {
           {tab === "Diario" && (
             <>
               <section className="card calendar-card">
-                <div className="section-row">
+                <div className="section-row" style={{ marginBottom: "12px" }}>
                   <h2>Bitácora diaria</h2>
-                  <input
-                    type="date"
-                    aria-label="Día seleccionado"
-                    value={date}
-                    onChange={(e) => {
-                      if (e.target.value) setDate(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="date-strip">
-                  {Array.from({ length: daysInMonth(month) }, (_, i) => {
-                    const day = month + "-" + String(i + 1).padStart(2, "0"),
-                      ds = summarize(entries, month, day, prefs.budget);
-                    return (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div style={{ display: "flex", gap: "4px" }}>
                       <button
-                        ref={(el) => {
-                          if (el && day === date)
-                            el.parentElement?.scrollTo({
-                              left:
-                                el.offsetLeft -
-                                el.parentElement.offsetLeft -
-                                el.parentElement.clientWidth / 2 +
-                                el.clientWidth / 2,
-                            });
-                        }}
-                        className={day === date ? "selected" : ""}
-                        key={day}
-                        onClick={() => setDate(day)}
+                        type="button"
+                        className="icon-btn"
+                        aria-label="Días anteriores"
+                        title="Días anteriores"
+                        onClick={() =>
+                          dateStripRef.current?.scrollBy({
+                            left: -220,
+                            behavior: "smooth",
+                          })
+                        }
                       >
-                        <span>
-                          {new Date(day + "T12:00:00").toLocaleDateString(
-                            "es-MX",
-                            { weekday: "short" },
-                          )}
-                        </span>
-                        <strong>{String(i + 1).padStart(2, "0")}</strong>
-                        <i
-                          className={
-                            ds.dayTx.length
-                              ? ds.dayExpense > ds.allowance
-                                ? "red-dot"
-                                : "green-dot"
-                              : ""
-                          }
-                        />
+                        <ChevronLeft size={18} />
                       </button>
-                    );
-                  })}
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        aria-label="Días siguientes"
+                        title="Días siguientes"
+                        onClick={() =>
+                          dateStripRef.current?.scrollBy({
+                            left: 220,
+                            behavior: "smooth",
+                          })
+                        }
+                      >
+                        <ChevronRight size={18} />
+                      </button>
+                    </div>
+                    <input
+                      type="date"
+                      aria-label="Día seleccionado"
+                      value={date}
+                      onChange={(e) => {
+                        if (e.target.value) setDate(e.target.value);
+                      }}
+                    />
+                  </div>
                 </div>
+                <DateStrip
+                  dateStripRef={dateStripRef}
+                  month={month}
+                  date={date}
+                  entries={entries}
+                  budget={prefs.budget}
+                  onSelectDate={(d) => setDate(d)}
+                />
               </section>
               <div className="stat-grid">
                 <section className="card stat">

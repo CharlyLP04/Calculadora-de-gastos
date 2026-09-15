@@ -555,10 +555,42 @@ main {
 .debt-card .section-row h3 {
   font-weight: 450;
 }
+.date-strip {
+  display: flex;
+  overflow-x: auto;
+  gap: 12px;
+  padding: 8px 4px 14px 4px;
+  scroll-behavior: smooth;
+  cursor: grab;
+  user-select: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+.date-strip:active {
+  cursor: grabbing;
+}
+.date-strip::-webkit-scrollbar {
+  height: 8px;
+}
+.date-strip::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+.date-strip::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+.date-strip::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
 .date-strip button {
   background: #ffffff04;
   border-color: #ffffff10;
   border-radius: 20px;
+  user-select: none;
 }
 .date-strip button.selected {
   background: #bed8e923;
