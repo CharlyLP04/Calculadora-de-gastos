@@ -1,0 +1,263 @@
+import { initializeApp, getApps, type FirebaseApp, type FirebaseOptions } from "firebase/app";
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDocs,
+  writeBatch,
+  onSnapshot,
+  type Firestore,
+  type Unsubscribe,
+} from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import { db, type Entry, type Prefs } from "./data";
+
+let firebaseApp: FirebaseApp | null = null;
+let firestoreDb: Firestore | null = null;
+let unsubscribeSnapshot: Unsubscribe | null = null;
+
+const DEFAULT_FIREBASE_CONFIG: FirebaseOptions = {
+  apiKey: "AIzaSyAPNCEM2U0FzP_L4jl1x5EdbJAJvi4oPVE",
+  authDomain: "mis-finanzas-af0aa.firebaseapp.com",
+  projectId: "mis-finanzas-af0aa",
+  storageBucket: "mis-finanzas-af0aa.firebasestorage.app",
+  messagingSenderId: "44820766100",
+  appId: "1:44820766100:web:6ef7836f766b2f78518381",
+  measurementId: "G-459TG230FE",
+};
+
+export function resolveSyncKey(prefs?: Prefs): string {
+  if (firebaseApp) {
+    try {
+      const user = getAuth(firebaseApp).currentUser;
+      if (user?.uid) return user.uid;
+    } catch {}
+  }
+  if (prefs?.syncToken?.trim()) return prefs.syncToken.trim();
+  let deviceId = localStorage.getItem("clara_device_sync_id");
+  if (!deviceId) {
+    deviceId = "dev_" + Math.random().toString(36).substring(2, 12);
+    localStorage.setItem("clara_device_sync_id", deviceId);
+  }
+  return deviceId;
+}
+
+function getEnvConfig(): FirebaseOptions | null {
+  if (import.meta.env.VITE_FIREBASE_CONFIG) {
+    try {
+      return JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG);
+    } catch {
+      // Ignorar error de parsing
+    }
+  }
+
+  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+  const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
+
+  if (apiKey && projectId) {
+    return {
+      apiKey,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`,
+      projectId,
+      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || `${projectId}.appspot.com`,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+      appId: import.meta.env.VITE_FIREBASE_APP_ID || "",
+    };
+  }
+
+  return null;
+}
+
+export function getStoredFirebaseConfig(prefs?: Prefs): FirebaseOptions {
+  if (prefs?.firebaseConfig) {
+    try {
+      return typeof prefs.firebaseConfig === "string"
+        ? JSON.parse(prefs.firebaseConfig)
+        : (prefs.firebaseConfig as FirebaseOptions);
+    } catch {
+      // Formato inválido
+    }
+  }
+
+  const local = localStorage.getItem("clara_firebase_config");
+  if (local) {
+    try {
+      return JSON.parse(local);
+    } catch {
+      // Formato inválido
+    }
+  }
+
+  return getEnvConfig() || DEFAULT_FIREBASE_CONFIG;
+}
+
+export function getFirebaseApp(config?: FirebaseOptions | null): FirebaseApp | null {
+  if (firebaseApp) return firebaseApp;
+  const resolvedConfig = config || getStoredFirebaseConfig();
+  if (!resolvedConfig || !resolvedConfig.apiKey || !resolvedConfig.projectId) {
+    return null;
+  }
+  try {
+    if (!getApps().length) {
+      firebaseApp = initializeApp(resolvedConfig);
+    } else {
+      firebaseApp = getApps()[0];
+    }
+    return firebaseApp;
+  } catch (error) {
+    console.error("Error al inicializar Firebase App:", error);
+    return null;
+  }
+}
+
+export function initFirebase(config?: FirebaseOptions | null): Firestore | null {
+  const app = getFirebaseApp(config);
+  if (!app) return null;
+
+  try {
+    if (!firestoreDb) {
+      firestoreDb = getFirestore(app);
+    }
+    return firestoreDb;
+  } catch (error) {
+    console.error("Error al inicializar Firebase Firestore:", error);
+    return null;
+  }
+}
+
+export function isFirebaseConfigured(prefs?: Prefs): boolean {
+  return !!getStoredFirebaseConfig(prefs);
+}
+
+export async function syncWithFirestore(prefs?: Prefs): Promise<number> {
+  const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
+  if (!firestore) {
+    throw new Error("Google Firebase no está configurado todavía.");
+  }
+
+  const syncKey = resolveSyncKey(prefs);
+  const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
+
+  const remoteSnapshot = await getDocs(entriesCol);
+  const remoteEntries = new Map<string, Entry>();
+  remoteSnapshot.forEach((docSnap) => {
+    const data = docSnap.data() as Entry;
+    if (data && data.id) {
+      remoteEntries.set(data.id, data);
+    }
+  });
+
+  const localEntries = await db.entries.toArray();
+  const localMap = new Map<string, Entry>();
+  for (const entry of localEntries) {
+    localMap.set(entry.id, entry);
+  }
+
+  const toUpload: Entry[] = [];
+  const toDownload: Entry[] = [];
+
+  for (const local of localEntries) {
+    const remote = remoteEntries.get(local.id);
+    if (!remote || local.updated > remote.updated) {
+      toUpload.push(local);
+    }
+  }
+
+  for (const [id, remote] of remoteEntries.entries()) {
+    const local = localMap.get(id);
+    if (!local || remote.updated > local.updated) {
+      toDownload.push(remote);
+    }
+  }
+
+  if (toUpload.length > 0) {
+    const batchSize = 400;
+    for (let i = 0; i < toUpload.length; i += batchSize) {
+      const chunk = toUpload.slice(i, i + batchSize);
+      const batch = writeBatch(firestore);
+      for (const item of chunk) {
+        const itemRef = doc(entriesCol, item.id);
+        const cleanItem: Record<string, any> = {};
+        for (const [key, value] of Object.entries(item)) {
+          if (value !== undefined) cleanItem[key] = value;
+        }
+        batch.set(itemRef, cleanItem, { merge: true });
+      }
+      await batch.commit();
+    }
+  }
+
+  if (toDownload.length > 0) {
+    await db.transaction("rw", db.entries, async () => {
+      for (const entry of toDownload) {
+        await db.entries.put(entry);
+      }
+    });
+  }
+
+  await db.prefs.update("main", { lastSync: new Date().toISOString() });
+  return toUpload.length + toDownload.length;
+}
+
+export function setupFirestoreRealtime(prefs?: Prefs, onUpdated?: () => void): () => void {
+  if (unsubscribeSnapshot) {
+    unsubscribeSnapshot();
+    unsubscribeSnapshot = null;
+  }
+
+  const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
+  if (!firestore) return () => {};
+
+  const syncKey = resolveSyncKey(prefs);
+  const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
+
+  unsubscribeSnapshot = onSnapshot(entriesCol, async (snapshot) => {
+    let hasChanges = false;
+    for (const change of snapshot.docChanges()) {
+      if (change.type === "added" || change.type === "modified") {
+        const remote = change.doc.data() as Entry;
+        if (!remote || !remote.id) continue;
+        const local = await db.entries.get(remote.id);
+        if (!local || remote.updated > local.updated) {
+          await db.entries.put(remote);
+          hasChanges = true;
+        }
+      }
+    }
+    if (hasChanges && onUpdated) {
+      onUpdated();
+    }
+  }, (err) => {
+    console.warn("Firestore snapshot listener error:", err);
+  });
+
+  return () => {
+    if (unsubscribeSnapshot) {
+      unsubscribeSnapshot();
+      unsubscribeSnapshot = null;
+    }
+  };
+}
+
+export async function clearCloudEntries(prefs?: Prefs): Promise<number> {
+  const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
+  if (!firestore) return 0;
+
+  const syncKey = resolveSyncKey(prefs);
+  const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
+
+  const snapshot = await getDocs(entriesCol);
+  if (snapshot.empty) return 0;
+
+  const batchSize = 400;
+  const docs = snapshot.docs;
+  for (let i = 0; i < docs.length; i += batchSize) {
+    const chunk = docs.slice(i, i + batchSize);
+    const batch = writeBatch(firestore);
+    for (const d of chunk) {
+      batch.delete(d.ref);
+    }
+    await batch.commit();
+  }
+  return docs.length;
+}

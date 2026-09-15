@@ -22,7 +22,9 @@ export interface Prefs {
   hidden: boolean;
   syncUrl: string;
   syncToken: string;
+  firebaseConfig?: string;
   lastSync?: string;
+  customCategories?: string[];
 }
 class Database extends Dexie {
   entries!: Table<Entry, string>;
@@ -33,26 +35,7 @@ class Database extends Dexie {
   }
 }
 export const db = new Database();
-export const defaults: Prefs = {
-  id: "main",
-  budget: 0,
-  hidden: false,
-  syncUrl: "",
-  syncToken: "",
-};
-export const today = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-export const money = (n: number) =>
-  new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(
-    n,
-  );
-export const round = (n: number) =>
-  Math.round((n + Number.EPSILON) * 100) / 100;
-export const daysInMonth = (month: string) =>
-  new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
-export const categories = [
+export const defaultCategories = [
   "Comida",
   "Gasolina",
   "Despensa",
@@ -66,6 +49,34 @@ export const categories = [
   "Nómina",
   "Otros",
 ];
+export const categories = defaultCategories;
+export function getCategories(prefs?: Prefs): string[] {
+  if (prefs?.customCategories && prefs.customCategories.length > 0) {
+    return prefs.customCategories;
+  }
+  return defaultCategories;
+}
+export const defaults: Prefs = {
+  id: "main",
+  budget: 0,
+  hidden: false,
+  syncUrl: "",
+  syncToken: "",
+  firebaseConfig: "",
+  customCategories: defaultCategories,
+};
+export const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+export const money = (n: number) =>
+  new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(
+    n,
+  );
+export const round = (n: number) =>
+  Math.round((n + Number.EPSILON) * 100) / 100;
+export const daysInMonth = (month: string) =>
+  new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
 export function summarize(
   entries: Entry[],
   month: string,
@@ -195,49 +206,12 @@ export function validEntries(value: unknown): value is Entry[] {
   });
 }
 let syncing = false;
-export async function syncData(prefs: Prefs) {
-  if (!prefs.syncUrl || !prefs.syncToken)
-    throw new Error("Configura la dirección y la clave del servidor.");
-  if (syncing) return;
+export async function syncData(prefs: Prefs): Promise<number> {
+  if (syncing) return 0;
   syncing = true;
   try {
-    const url = new URL(prefs.syncUrl);
-    if (
-      url.protocol !== "https:" &&
-      !["localhost", "127.0.0.1"].includes(url.hostname)
-    )
-      throw new Error("La sincronización requiere HTTPS.");
-    const response = await fetch(
-      new URL(
-        "api/sync",
-        prefs.syncUrl.endsWith("/") ? prefs.syncUrl : prefs.syncUrl + "/",
-      ),
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${prefs.syncToken}`,
-        },
-        body: JSON.stringify({ entries: await db.entries.toArray() }),
-        signal: AbortSignal.timeout(15000),
-      },
-    );
-    if (!response.ok)
-      throw new Error(
-        response.status === 401
-          ? "La clave del servidor no es válida."
-          : "No se pudo sincronizar. Tus datos siguen guardados aquí.",
-      );
-    const payload = await response.json();
-    if (!validEntries(payload.entries))
-      throw new Error("El servidor devolvió datos no válidos.");
-    await db.transaction("rw", db.entries, async () => {
-      for (const e of payload.entries) {
-        const local = await db.entries.get(e.id);
-        if (!local || e.updated > local.updated) await db.entries.put(e);
-      }
-    });
-    await db.prefs.update("main", { lastSync: new Date().toISOString() });
+    const { syncWithFirestore } = await import("./firebase");
+    return await syncWithFirestore(prefs);
   } finally {
     syncing = false;
   }
@@ -347,5 +321,12 @@ export async function seedDemo() {
   await db.transaction("rw", db.entries, db.prefs, async () => {
     await db.entries.bulkPut(records);
     await db.prefs.put({ ...defaults, budget: 22000 });
+  });
+}
+
+export async function wipeAllData(): Promise<void> {
+  await db.transaction("rw", db.entries, db.prefs, async () => {
+    await db.entries.clear();
+    await db.prefs.put({ ...defaults, id: "main" });
   });
 }

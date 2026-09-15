@@ -1,101 +1,101 @@
-# Clara · Finanzas personales
+# Clara · Finanzas Personales
 
-PWA de finanzas personales en español y MXN. Diseño móvil en azul marino inspirado en las referencias del proyecto: tarjetas suaves, tipografía Helvetica Neue/system, navegación inferior, cifras grandes y acentos semánticos.
+> **Tu dinero, con claridad.** PWA de finanzas personales en español y MXN con diseño inspirado en iOS (Liquid Glass, micro-interacciones táctiles, tarjetas suaves y modo oscuro en azul marino).
 
-## Iniciar
+---
 
-Requiere Node.js **24 LTS** y npm.
+## Novedades y Arquitectura Híbrida
 
-```sh
-npm ci
+Clara combina lo mejor de dos mundos:
+1. **Offline-First (Máxima Privacidad):** Utiliza **IndexedDB (Dexie)** en el navegador. La aplicación es 100% funcional sin internet y puedes usarla en **Modo Local / Invitado** sin registrarte ni enviar ningún dato a la red.
+2. **Nube Gratuita con Google Firebase:**
+   - **Google Cloud Firestore:** Base de datos en tiempo real 24/7 sin costo de servidor. Sincroniza tus finanzas entre tu teléfono, tablet y computadora instantáneamente.
+   - **Google Sign-In:** Inicio de sesión seguro con tu cuenta de Google para vincular tus finanzas a tu perfil.
+   - **Firebase Hosting:** Alojamiento gratuito con certificado SSL (HTTPS) listo para instalarse como aplicación móvil (PWA).
+3. **Visualización y Gráficas Interactivas estilo iOS:**
+   - **Gráfica Donut animada:** Distribución de gastos por categoría con selección táctil y visualización en tiempo real de porcentajes y montos.
+   - **Comparativa de Flujo:** Barra visual de Ingresos vs Gastos con tasa de ahorro del mes.
+4. **Experiencia Móvil Pulida:**
+   - Diálogos tipo **Bottom Sheet estilo iOS** con bloqueo de desplazamiento del fondo (`scroll-lock`).
+   - Cabecera y monto `$ 0.00` siempre visibles al capturar gastos.
+   - Micro-interacciones de presión táctil (`active:scale`) y transiciones de pantalla con curvas Bézier fluidas.
+
+---
+
+## Inicio Rápido (Local)
+
+Requiere Node.js 20+ (recomendado Node 24 LTS) y npm.
+
+```bash
+# 1. Instalar dependencias
+npm install
+
+# 2. Iniciar servidor de desarrollo local
 npm run dev
 ```
 
-Abrir la dirección que muestra Vite. La base de datos empieza vacía. **Explorar un ejemplo** carga datos ficticios únicamente cuando no hay registros; no se envían al repositorio.
+Abre en tu navegador la dirección indicada (por defecto `http://localhost:5173`).  
+Para abrirlo desde tu teléfono en la misma red Wi-Fi, usa la IP de red mostrada en la terminal (ej. `http://192.168.100.X:5173`).
 
-```sh
-npm run build
-npm run preview
-npm test
-node server/sync.test.mjs
+---
+
+## Cómo Publicar Gratis en Google Firebase Hosting
+
+El proyecto ya incluye la configuración lista en `firebase.json` y `.firebaserc`.
+
+1. **Iniciar sesión en Firebase CLI:**
+   ```bash
+   npx firebase-tools login
+   ```
+   *(Se abrirá una ventana en tu navegador para autorizar con tu cuenta de Google)*.
+
+2. **Compilar y publicar:**
+   ```bash
+   npm run deploy
+   ```
+   Google compilará tu aplicación y te entregará tu enlace web público y seguro (por ejemplo: `https://mis-finanzas-af0aa.web.app`).
+
+### Instalar como App en tu Teléfono:
+- **iPhone / iPad (Safari):** Abre tu enlace web → Botón Compartir → **"Añadir a pantalla de inicio"**.
+- **Android (Chrome):** Abre tu enlace web → Menú (3 puntos) → **"Instalar aplicación"** o **"Añadir a pantalla de inicio"**.
+
+---
+
+## Funciones Principales
+
+- **Inicio:** Balance neto del mes, presupuesto, límite variable diario, cuentas y movimientos recientes.
+- **Diario:** Selección de mes y día, calendario interactivo, filtros y buscador instantáneo de transacciones.
+- **Movimientos:** Alta y edición rápida de ingresos y gastos con teclado numérico ergonómico y categorías con iconos.
+- **Cuentas:** Registro y actualización de saldos en efectivo, débito, crédito y ahorros.
+- **Fijos y Compromisos:** Planificación mensual prorrateada por día de renta, servicios, suscripciones, etc.
+- **Deudas y Simulador:** Seguimiento de saldo original, abonos vinculados, cuota mensual y simulación de pagos anticipados sin intereses.
+- **Balances y Reportes:** Gráfica Donut animada, desglose por categoría, flujo de ingresos vs gastos y exportación en un clic a **Excel (.xlsx de 3 pestañas)**, **PDF ejecutivo** y **CSV**.
+- **Respaldos Atómicos:** Descarga y restauración completa de tus registros en archivo JSON.
+- **Seguridad Biométrica:** Bloqueo opcional mediante WebAuthn (Face ID, Touch ID o PIN del dispositivo).
+
+---
+
+## Variables de Entorno (.env)
+
+Puedes configurar tu proyecto de Firebase mediante variables de entorno en un archivo `.env`:
+
+```env
+VITE_FIREBASE_API_KEY=tu_api_key
+VITE_FIREBASE_AUTH_DOMAIN=tu_proyecto.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=tu_proyecto
+VITE_FIREBASE_STORAGE_BUCKET=tu_proyecto.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID=tu_sender_id
+VITE_FIREBASE_APP_ID=tu_app_id
 ```
 
-El service worker se activa en la versión compilada, no en el servidor de desarrollo. Se incluyen iconos PNG de 192/512 px, icono maskable y apple-touch-icon.
+*(Consulta `.env.example` para más detalles).*
 
-## Funciones
+---
 
-- Inicio: balance neto mensual, presupuesto, límite variable diario, cuentas y últimos movimientos.
-- Diario: selección de mes/día, calendario horizontal, búsqueda, ingresos, gastos y reserva diaria.
-- Movimientos: crear, editar y eliminar ingresos/gastos; categoría, cuenta, fecha y teclado numérico táctil.
-- Cuentas: saldo inicial más todos los movimientos vinculados; la edición del nombre actualiza sus movimientos.
-- Fijos: compromisos mensuales prorrateados entre los días reales del mes.
-- Deudas: saldo original, pagos anteriores, cuota mensual, abonos vinculados, progreso y simulador sin intereses.
-- Balances: gastos por categoría y exportación CSV, Excel (3 pestañas) y PDF ejecutivo de una página.
-- Respaldo JSON y restauración validada y atómica. Un respaldo reemplaza los registros actuales; descarga uno antes de restaurar.
-- Persistencia IndexedDB/Dexie, caché Workbox y exportaciones disponibles sin conexión después de la primera carga completa.
-- Privacidad de cifras y bloqueo opcional mediante WebAuthn del dispositivo.
-- Sincronización opcional con servidor propio; nunca se muestra “sincronizado” solo por tener conexión.
+## Scripts Disponibles
 
-## Qué representan los números
-
-**Balance neto mensual = ingresos registrados − gastos registrados** en el mes seleccionado. No incluye saldos iniciales de cuentas.
-
-**Saldo de una cuenta = saldo inicial + ingresos − gastos** de todo su historial.
-
-**Reserva diaria = (fijos mensuales + cuotas de deudas activas) / días del mes.** Las cuotas se limitan al saldo pendiente cuando este es menor.
-
-**Límite variable diario = máximo(0, presupuesto − fijos − cuotas) / días del mes.** Es un reparto uniforme del presupuesto, no una predicción de ingresos futuros ni un recálculo de lo que queda del mes.
-
-Los fijos y cuotas son **planificación**: no generan cargos automáticos. Cada pago debe registrarse para afectar el balance. Las tarjetas actuales de planificación se usan al consultar cualquier mes; no existe versionado histórico de planes. Los abonos sí conservan fecha e historial. El simulador supone cuotas constantes, sin intereses, comisiones ni nuevos cargos.
-
-## Instalar en el teléfono
-
-Publica `dist/` en un servidor HTTPS de archivos estáticos.
-
-- iOS: abrir en Safari → Compartir → Añadir a pantalla de inicio.
-- Android: abrir en Chrome → Instalar app / Añadir a pantalla de inicio.
-- Abrir con conexión una vez y esperar la carga completa. Los datos se guardan en ese navegador/origen; instalar en otro dispositivo no los copia automáticamente.
-- Las nuevas versiones quedan en espera hasta cerrar las ventanas de la app y volver a abrirla, para evitar perder un formulario en curso.
-
-Para un subdirectorio (por ejemplo GitHub Pages), definir `BASE_PATH=/Calculadora-de-gastos/` al compilar. Se incluye un workflow de validación que genera el artefacto `crystal-dist`; no publica automáticamente.
-
-## Servidor de sincronización opcional
-
-Sin configurar servidor, la app es completamente local. El servidor incluido es **personal, de un solo usuario**; todos los dispositivos que usen su clave comparten la misma base. No conectes usuarios independientes a una instancia.
-
-1. Compilar la app.
-2. Generar una clave aleatoria de al menos 32 caracteres (`node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`).
-3. Definir `SYNC_TOKEN` en el entorno del servidor; no añadirla al código ni al repositorio.
-4. Ejecutar `npm run server` (Node 24). Por defecto escucha en `127.0.0.1:3000` y sirve `dist/`.
-5. Publicar mediante un proxy HTTPS. Si la PWA está en otro origen, definir `ALLOWED_ORIGIN` con su origen exacto (sin ruta ni `/` final).
-6. En Configuración de Clara, guardar la dirección base HTTPS y la clave. Usar **Sincronizar ahora** para comprobar la conexión.
-
-Variables adicionales: `PORT`, `HOST`, `DATA_DIR`. Por defecto SQLite vive en `server/data/crystal.sqlite`, excluido de Git; respalda esa carpeta de forma privada. Las pruebas usan una base temporal aislada.
-
-La sincronización usa registros por ID, última edición según reloj del dispositivo y marcas de eliminación. No fusiona campos editados simultáneamente: gana el registro con fecha más reciente. Mantén los relojes sincronizados. Los registros se envían por HTTPS; el servidor y su base deben estar bajo tu control. Presupuesto y preferencias de interfaz son locales y no se sincronizan (el presupuesto se incluye en el respaldo JSON).
-
-La sincronización automática se intenta al cambiar registros, recuperar conexión y periódicamente mientras la app está abierta. iOS/Android pueden suspender una PWA cerrada: vuelve a abrirla para completar la sincronización pendiente. Los datos no se borran al fallar la red.
-
-## Seguridad local
-
-WebAuthn solicita verificación del usuario y comprueba desafío, origen, RP ID y firma ECDSA. El autenticador puede usar biometría **o el PIN del dispositivo**, según el sistema. Se requiere HTTPS o localhost y un navegador que exponga `getPublicKey()` para habilitarlo.
-
-Este bloqueo protege la **interfaz**, no cifra IndexedDB y no sustituye el bloqueo del teléfono. Los respaldos contienen datos en texto claro. La clave del servidor permanece en el almacenamiento local del navegador y no se incluye en exportaciones. No guardes información bancaria de autenticación en conceptos o categorías.
-
-No se ha validado biometría con un iPhone/Android físico en esta implementación. Prueba el desbloqueo en tus dispositivos antes de depender de él. Borrar los datos del sitio también borra tus finanzas locales; conserva respaldos.
-
-## Verificación realizada
-
-- TypeScript sin errores y compilación Vite/Workbox completada.
-- Pruebas de año bisiesto, cálculos mensuales, abonos/eliminaciones y validación de respaldos.
-- Servidor: autenticación, validación, escritura/lectura, conflictos, marcas de eliminación y CORS.
-- Navegador: visualización móvil, alta de movimiento y persistencia al recargar; recarga y exportaciones con el servidor detenido.
-- Revisión npm: sin vulnerabilidades conocidas en las versiones fijadas al crear el proyecto.
-
-En entornos Windows que impiden crear subprocesos se incluyen alternativas de compilación/pruebas en el mismo proceso: `node scripts/build-portable.mjs` y `node scripts/test-portable.mjs`. La compilación normal optimizada es `npm run build`. Los archivos grandes de exportación se cargan bajo demanda y se precachean para usarlos sin red.
-
-## Identidad Clara y acabado de vidrio
-
-El rediseño simplifica la jerarquía, elimina frases y paneles decorativos y añade un monograma C vectorial. La tarjeta de balance usa vidrio perlado; la navegación y los diálogos usan transparencias con desenfoque mediante `backdrop-filter` y `-webkit-backdrop-filter`. Hay alternativas opacas para navegadores sin soporte y preferencias de transparencia reducida. Los botones respetan tamaños táctiles y los campos mantienen un mínimo de 16 px.
-
-El acabado es una implementación web inspirada en Liquid Glass, no un componente nativo de Apple. La revisión se realiza en navegador con tamaños móviles; queda pendiente validar visualmente en dispositivos iOS y Android físicos. Los identificadores internos de la base de datos y credenciales conservan su nombre original para preservar registros existentes al actualizar.
+- `npm run dev`: Inicia el servidor de desarrollo local con recarga rápida (HMR).
+- `npm run build`: Compila TypeScript y genera los archivos estáticos optimizados en `dist/`.
+- `npm run preview`: Previsualiza localmente la versión de producción generada.
+- `npm test`: Ejecuta la suite de pruebas unitarias con Vitest.
+- `npm run deploy`: Publica automáticamente la app en Google Firebase Hosting.

@@ -42,6 +42,8 @@ import {
   TrendingUp,
   Smartphone,
   Delete,
+  LogOut,
+  LogIn,
 } from "lucide-react";
 import {
   db,
@@ -51,18 +53,26 @@ import {
   round,
   daysInMonth,
   categories,
+  defaultCategories,
+  getCategories,
   summarize,
   debtRemaining,
   saveEntry,
   removeEntry,
   seedDemo,
   syncData,
+  wipeAllData,
   type Entry,
   type Prefs,
   type Kind,
 } from "./data";
 import { exportReport, restoreBackup } from "./reports";
 import { enableLock, unlock, disableLock, hasLock } from "./security";
+import { loginWithGoogle, logoutUser, subscribeToAuth } from "./auth";
+import { clearCloudEntries } from "./firebase";
+import type { User } from "firebase/auth";
+import { CategoryDonutChart, IncomeExpenseFlow } from "./components/Charts";
+
 type Tab = "Inicio" | "Diario" | "Fijos" | "Balances";
 const icons: Record<string, typeof Wallet> = {
   Comida: Utensils,
@@ -117,6 +127,111 @@ function Modal({
     </dialog>
   );
 }
+function LoginScreen({
+  onLoginWithGoogle,
+  onContinueAsGuest,
+  busy,
+  online,
+  toast,
+}: {
+  onLoginWithGoogle: () => void;
+  onContinueAsGuest: () => void;
+  busy: boolean;
+  online: boolean;
+  toast?: string;
+}) {
+  return (
+    <div className="login-screen-wrap">
+      <div className="login-card">
+        <div className="login-brand">
+          <div className="login-brand-icon">
+            <BrandMark />
+          </div>
+          <h1 className="login-title">clara</h1>
+          <p className="login-tagline">Finanzas personales claras y privadas</p>
+        </div>
+
+        <div className="login-features">
+          <div className="login-feat-item">
+            <span className="login-feat-dot" />
+            <span>Control de tus gastos, cuentas y metas</span>
+          </div>
+          <div className="login-feat-item">
+            <span className="login-feat-dot" />
+            <span>100% privado y offline-first en tu dispositivo</span>
+          </div>
+          <div className="login-feat-item">
+            <span className="login-feat-dot" />
+            <span>Sincronización en la nube con Google</span>
+          </div>
+        </div>
+
+        <div className="login-actions">
+          <button
+            type="button"
+            className="google-login-btn primary full"
+            style={{
+              width: "100%",
+              justifyContent: "center",
+              padding: "12px 16px",
+              fontSize: "15px",
+            }}
+            disabled={busy || !online}
+            onClick={onLoginWithGoogle}
+          >
+            <svg className="google-icon-svg" viewBox="0 0 24 24">
+              <path
+                fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+              />
+              <path
+                fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+              />
+            </svg>
+            Continuar con Google
+          </button>
+
+          <button
+            type="button"
+            className="secondary full"
+            style={{
+              width: "100%",
+              padding: "12px 16px",
+              fontSize: "14px",
+              marginTop: "10px",
+            }}
+            disabled={busy}
+            onClick={onContinueAsGuest}
+          >
+            Continuar como invitado (Modo local)
+          </button>
+        </div>
+
+        <p className="login-footnote">
+          En modo invitado tus datos se guardan exclusivamente en este dispositivo.
+        </p>
+
+        {toast && (
+          <p
+            role="alert"
+            style={{ marginTop: "14px", fontSize: "13px", color: "#f87171" }}
+          >
+            {toast}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 export default function App() {
   const entries = useLiveQuery(() => db.entries.toArray(), []) || [];
   const prefs = useLiveQuery(() => db.prefs.get("main"), []) || defaults;
@@ -136,7 +251,24 @@ export default function App() {
     [update, setUpdate] = useState(false),
     [install, setInstall] = useState<any>(null),
     [simDebt, setSimDebt] = useState<Entry | null>(null),
-    [extra, setExtra] = useState("500");
+    [extra, setExtra] = useState("500"),
+    [currentUser, setCurrentUser] = useState<User | null>(null),
+    [isGuest, setIsGuest] = useState<boolean>(
+      () => localStorage.getItem("clara_guest_mode") === "true",
+    ),
+    [authChecking, setAuthChecking] = useState(true);
+
+  useEffect(() => {
+    return subscribeToAuth((user) => {
+      setCurrentUser(user);
+      if (user) {
+        setIsGuest(false);
+        localStorage.setItem("clara_guest_mode", "false");
+        void syncData(prefs).catch(() => {});
+      }
+      setAuthChecking(false);
+    });
+  }, [prefs]);
   const month = date.slice(0, 7),
     live = entries.filter((e) => !e.deleted),
     s = summarize(entries, month, date, prefs.budget),
@@ -157,6 +289,71 @@ export default function App() {
   };
   const savePrefs = async (change: Partial<Prefs>) =>
     db.prefs.put({ ...prefs, ...change });
+  const availableCategories = getCategories(prefs);
+  const handleAddCategory = async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (
+      availableCategories.some(
+        (c) => c.toLowerCase() === trimmed.toLowerCase(),
+      )
+    ) {
+      notify("Esa categoría ya existe");
+      return;
+    }
+    const updated = [...availableCategories, trimmed];
+    await savePrefs({ customCategories: updated });
+    notify(`Categoría “${trimmed}” agregada`);
+  };
+  const handleDeleteCategory = async (name: string) => {
+    if (availableCategories.length <= 1) {
+      notify("Debes tener al menos una categoría");
+      return;
+    }
+    const updated = availableCategories.filter((c) => c !== name);
+    await savePrefs({ customCategories: updated });
+    notify(`Categoría “${name}” eliminada`);
+  };
+  const handleLogout = async () => {
+    setBusy(true);
+    try {
+      await logoutUser();
+      setCurrentUser(null);
+      setIsGuest(false);
+      localStorage.removeItem("clara_guest_mode");
+      setSettings(false);
+      notify("Sesión cerrada correctamente.");
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Error al cerrar sesión.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const handleWipeAllData = async () => {
+    if (
+      !confirm(
+        "⚠️ ¿Estás seguro de restablecer desde cero?\n\nEsta acción borrará permanentemente todos tus movimientos, gastos fijos, cuentas, deudas y configuraciones tanto de este equipo como de la nube.\n\nEsta acción NO se puede deshacer.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await clearCloudEntries(prefs).catch(() => {});
+      await wipeAllData();
+      await logoutUser().catch(() => {});
+      setCurrentUser(null);
+      setIsGuest(false);
+      localStorage.removeItem("clara_guest_mode");
+      localStorage.removeItem("clara_device_sync_id");
+      setSettings(false);
+      notify("Todos los datos han sido restablecidos desde cero.");
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Error al restablecer datos.");
+    } finally {
+      setBusy(false);
+    }
+  };
   useEffect(() => {
     void db.prefs
       .get("main")
@@ -197,23 +394,45 @@ export default function App() {
       return () => clearTimeout(t);
     }
   }, [toast]);
+  const canSync = Boolean(
+    (prefs.syncUrl && prefs.syncToken) ||
+      prefs.firebaseConfig ||
+      localStorage.getItem("clara_firebase_config") ||
+      import.meta.env.VITE_FIREBASE_CONFIG ||
+      (import.meta.env.VITE_FIREBASE_API_KEY &&
+        import.meta.env.VITE_FIREBASE_PROJECT_ID),
+  );
   useEffect(() => {
-    if (!online || !prefs.syncUrl || !prefs.syncToken || locked) return;
+    if (!online || !canSync || locked) return;
     const t = setTimeout(() => {
       void syncData(prefs).catch(() => {});
     }, 2000);
     return () => clearTimeout(t);
-  }, [online, prefs.syncUrl, prefs.syncToken, entries, locked]);
+  }, [online, canSync, prefs, entries, locked]);
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [tab]);
   useEffect(() => {
-    if (!online || !prefs.syncUrl || !prefs.syncToken || locked) return;
+    if (!online || !canSync || locked) return;
     const timer = setInterval(() => {
       void syncData(prefs).catch(() => {});
     }, 60000);
     return () => clearInterval(timer);
-  }, [online, prefs.syncUrl, prefs.syncToken, locked]);
+  }, [online, canSync, prefs, locked]);
+  useEffect(() => {
+    if (!online || locked) return;
+    let cleanup: (() => void) | undefined;
+    import("./firebase")
+      .then(({ isFirebaseConfigured, setupFirestoreRealtime }) => {
+        if (isFirebaseConfigured(prefs)) {
+          cleanup = setupFirestoreRealtime(prefs);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [online, prefs.firebaseConfig, prefs.syncToken, locked]);
   const changeMonth = (value: string) => {
     if (/^\d{4}-\d{2}$/.test(value)) setDate(value + "-01");
   };
@@ -348,6 +567,41 @@ export default function App() {
         {toast && <p role="alert">{toast}</p>}
       </div>
     );
+  if (authChecking) {
+    return (
+      <div className="login-screen-wrap">
+        <div className="login-brand-icon" style={{ animation: "pulse 1.5s infinite" }}>
+          <BrandMark />
+        </div>
+      </div>
+    );
+  }
+  if (!currentUser && !isGuest) {
+    return (
+      <LoginScreen
+        onLoginWithGoogle={() => {
+          setBusy(true);
+          void run(
+            async () => {
+              const user = await loginWithGoogle();
+              setCurrentUser(user);
+              setIsGuest(false);
+              localStorage.setItem("clara_guest_mode", "false");
+            },
+            "Sesión iniciada con Google",
+          ).finally(() => setBusy(false));
+        }}
+        onContinueAsGuest={() => {
+          setIsGuest(true);
+          localStorage.setItem("clara_guest_mode", "true");
+          notify("Modo local activado: tus datos se guardarán en este equipo.");
+        }}
+        busy={busy}
+        online={online}
+        toast={toast}
+      />
+    );
+  }
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -370,12 +624,60 @@ export default function App() {
           <button className="settings-link" onClick={() => setSettings(true)}>
             <Settings size={18} /> Configuración <ArrowRight size={16} />
           </button>
-          <div className="profile">
-            <div className="avatar">C</div>
-            <div>
-              <strong>Mi cuenta personal</strong>
-              <span>Moneda · MXN</span>
+          <div className="profile" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {currentUser?.photoURL ? (
+              <img
+                src={currentUser.photoURL}
+                alt="Avatar"
+                className="avatar"
+                style={{ width: "36px", height: "36px", borderRadius: "50%", objectFit: "cover" }}
+              />
+            ) : (
+              <div className="avatar">
+                {currentUser
+                  ? (currentUser.displayName || currentUser.email || "U")[0].toUpperCase()
+                  : "C"}
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+              <strong style={{ display: "block", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                {currentUser
+                  ? currentUser.displayName || currentUser.email
+                  : isGuest
+                    ? "Modo Local (Privado)"
+                    : "Mi cuenta"}
+              </strong>
+              <span>
+                {currentUser
+                  ? "Conectado a Google"
+                  : "Moneda · MXN"}
+              </span>
             </div>
+            {currentUser ? (
+              <button
+                type="button"
+                className="icon-btn"
+                title="Cerrar sesión de Google"
+                style={{ marginLeft: "auto", flexShrink: 0, color: "#ef4444" }}
+                onClick={() => {
+                  if (confirm("¿Cerrar sesión de Google?")) {
+                    void run(() => logoutUser(), "Sesión cerrada");
+                  }
+                }}
+              >
+                <LogOut size={16} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="icon-btn"
+                title="Iniciar sesión con Google"
+                style={{ marginLeft: "auto", flexShrink: 0, color: "var(--accent, #38bdf8)" }}
+                onClick={() => setSettings(true)}
+              >
+                <LogIn size={16} />
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -403,6 +705,35 @@ export default function App() {
               />
               <ChevronDown size={14} />
             </label>
+            {currentUser ? (
+              <button
+                className="icon-btn"
+                title={`Sesión de ${currentUser.email}. Toca para cerrar sesión.`}
+                onClick={() => {
+                  if (confirm(`¿Cerrar sesión de Google (${currentUser.email})?`)) {
+                    void run(() => logoutUser(), "Sesión cerrada");
+                  }
+                }}
+              >
+                {currentUser.photoURL ? (
+                  <img
+                    src={currentUser.photoURL}
+                    alt="Avatar"
+                    style={{ width: "22px", height: "22px", borderRadius: "50%", objectFit: "cover" }}
+                  />
+                ) : (
+                  <LogOut size={18} style={{ color: "#ef4444" }} />
+                )}
+              </button>
+            ) : (
+              <button
+                className="icon-btn"
+                title="Iniciar sesión con Google"
+                onClick={() => setSettings(true)}
+              >
+                <LogIn size={18} />
+              </button>
+            )}
             <button
               className="icon-btn"
               aria-label="Configuración"
@@ -622,12 +953,14 @@ export default function App() {
                       </button>
                     </div>
                     {renderTx(transactions.slice(0, 4))}
-                    <button
-                      className="register-row"
-                      onClick={() => setForm({ kind: "transaction" })}
-                    >
-                      <Plus size={16} /> Registrar un movimiento
-                    </button>
+                    {transactions.length > 0 && (
+                      <button
+                        className="register-row"
+                        onClick={() => setForm({ kind: "transaction" })}
+                      >
+                        <Plus size={16} /> Registrar un movimiento
+                      </button>
+                    )}
                   </section>
                 </div>
                 <div>
@@ -965,13 +1298,16 @@ export default function App() {
                   </strong>
                 </section>
               </div>
+              {/* Flujo Comparativo Ingresos vs Gastos */}
+              <IncomeExpenseFlow income={s.income} expense={s.expense} />
+
               <section className="card">
                 <div className="section-row">
                   <h2>¿A dónde se fue tu dinero?</h2>
                   <span className="muted">{month}</span>
                 </div>
-                <div className="category-chart">
-                  {[...new Set(s.tx.map((e) => e.category))]
+                <CategoryDonutChart
+                  data={[...new Set(s.tx.map((e) => e.category))]
                     .map((c) => ({
                       category: c,
                       amount: s.tx
@@ -981,23 +1317,9 @@ export default function App() {
                         .reduce((v, e) => v + e.amount, 0),
                     }))
                     .filter((c) => c.amount > 0)
-                    .sort((a, b) => b.amount - a.amount)
-                    .map((c) => (
-                      <div className="chart-row" key={c.category}>
-                        <span>{c.category}</span>
-                        <Progress
-                          value={s.expense ? (c.amount / s.expense) * 100 : 0}
-                        />
-                        <strong>{fmt(c.amount)}</strong>
-                        <span>{Math.round((c.amount / s.expense) * 100)}%</span>
-                      </div>
-                    ))}
-                  {!s.expense && (
-                    <p className="empty">
-                      Tus categorías aparecerán después del primer gasto.
-                    </p>
-                  )}
-                </div>
+                    .sort((a, b) => b.amount - a.amount)}
+                  totalExpense={s.expense}
+                />
               </section>
               <section className="card export-card">
                 <div>
@@ -1082,6 +1404,8 @@ export default function App() {
             accounts={accounts}
             date={date}
             entries={live}
+            categories={availableCategories}
+            onAddCategory={handleAddCategory}
             onSave={() => {
               setForm(null);
               notify("Guardado en este dispositivo");
@@ -1153,12 +1477,149 @@ export default function App() {
         </Modal>
       )}
       {settings && (
-        <Modal title="Tu configuración" onClose={() => setSettings(false)}>
+        <Modal title="Configuración" onClose={() => setSettings(false)}>
           {toast && (
             <p className="inline-notice" role="status">
               {toast}
             </p>
           )}
+
+          {/* Apartado de Perfil */}
+          <div className="google-auth-card" style={{ marginBottom: "20px" }}>
+            <div className="section-row" style={{ marginBottom: "10px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px" }}>👤 Perfil</h3>
+              <span
+                className="savings-badge"
+                style={{
+                  background: currentUser
+                    ? "rgba(16, 185, 129, 0.15)"
+                    : "rgba(56, 189, 248, 0.15)",
+                  color: currentUser ? "#34d399" : "#38bdf8",
+                }}
+              >
+                {currentUser ? "Google Conectado" : "Modo Invitado"}
+              </span>
+            </div>
+
+            <div className="user-profile-header">
+              {currentUser?.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName || "Usuario"}
+                  className="user-avatar"
+                />
+              ) : (
+                <div
+                  className="user-avatar"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: currentUser ? "#3b82f6" : "rgba(255, 255, 255, 0.12)",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {(
+                    currentUser?.displayName ||
+                    currentUser?.email ||
+                    (isGuest ? "I" : "U")
+                  )[0].toUpperCase()}
+                </div>
+              )}
+              <div className="user-info-text">
+                <strong>
+                  {currentUser
+                    ? currentUser.displayName || currentUser.email
+                    : "Invitado (Modo Local)"}
+                </strong>
+                <span>
+                  {currentUser
+                    ? currentUser.email
+                    : "Datos guardados solo en este equipo"}
+                </span>
+              </div>
+            </div>
+
+            {currentUser ? (
+              <button
+                type="button"
+                className="secondary full"
+                style={{
+                  marginTop: "12px",
+                  color: "#ef4444",
+                  borderColor: "rgba(239, 68, 68, 0.3)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                }}
+                disabled={busy}
+                onClick={handleLogout}
+              >
+                <LogOut size={16} /> Cerrar sesión
+              </button>
+            ) : (
+              <div style={{ marginTop: "12px" }}>
+                <button
+                  type="button"
+                  className="google-login-btn full"
+                  disabled={busy || !online}
+                  onClick={() => {
+                    setBusy(true);
+                    void run(
+                      async () => {
+                        const user = await loginWithGoogle();
+                        setCurrentUser(user);
+                        setIsGuest(false);
+                        localStorage.setItem("clara_guest_mode", "false");
+                      },
+                      "Sesión iniciada con Google",
+                    ).finally(() => setBusy(false));
+                  }}
+                  style={{ width: "100%", justifyContent: "center" }}
+                >
+                  <svg className="google-icon-svg" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    />
+                  </svg>
+                  Vincular con cuenta de Google
+                </button>
+                <button
+                  type="button"
+                  className="text-button"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "center",
+                    marginTop: "10px",
+                    color: "var(--muted, #94a3b8)",
+                    fontSize: "13px",
+                  }}
+                  onClick={handleLogout}
+                >
+                  <LogOut size={14} style={{ verticalAlign: "middle", marginRight: 4 }} />
+                  Salir al inicio de sesión
+                </button>
+              </div>
+            )}
+          </div>
+
+          <hr />
+
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -1167,8 +1628,9 @@ export default function App() {
                 () =>
                   savePrefs({
                     budget: Number(f.get("budget")),
-                    syncUrl: String(f.get("syncUrl")).trim(),
-                    syncToken: String(f.get("syncToken")).trim(),
+                    syncUrl: String(f.get("syncUrl") || "").trim(),
+                    syncToken: String(f.get("syncToken") || "").trim(),
+                    firebaseConfig: String(f.get("firebaseConfig") || "").trim(),
                   }),
                 "Configuración guardada",
               );
@@ -1190,46 +1652,60 @@ export default function App() {
               El límite diario reparte lo disponible después de reservar fijos y
               cuotas.
             </p>
-            <h3>Sincronización opcional</h3>
-            <p className="field-help">
-              Conecta tu servidor Clara para sincronizar entre dispositivos. Sin
-              servidor, todo permanece aquí.
-            </p>
-            <label>
-              Dirección del servidor
-              <input
-                name="syncUrl"
-                type="url"
-                placeholder="https://tu-servidor.com"
-                defaultValue={prefs.syncUrl}
-              />
-            </label>
-            <label>
-              Clave de acceso
-              <input
-                name="syncToken"
-                type="password"
-                autoComplete="off"
-                defaultValue={prefs.syncToken}
-              />
-            </label>
+
+              <details style={{ marginTop: "16px" }}>
+                <summary
+                  style={{
+                    cursor: "pointer",
+                    color: "rgba(255, 255, 255, 0.6)",
+                    fontSize: "0.82rem",
+                  }}
+                >
+                  Avanzado: Servidor propio o clave manual
+                </summary>
+                <div style={{ marginTop: "10px" }}>
+                  <label>
+                    Clave / Identificador personalizado
+                    <input
+                      name="syncToken"
+                      type="text"
+                      placeholder="Identificador opcional"
+                      defaultValue={prefs.syncToken}
+                    />
+                  </label>
+                  <label>
+                    Dirección de servidor propio (Node.js / Express)
+                    <input
+                      name="syncUrl"
+                      type="url"
+                      placeholder="https://tu-servidor.com"
+                      defaultValue={prefs.syncUrl}
+                    />
+                  </label>
+                </div>
+              </details>
+
             <button className="primary full" type="submit">
               <Check size={16} /> Guardar configuración
             </button>
           </form>
           <button
             className="secondary full"
-            disabled={busy || !online || !prefs.syncUrl}
+            disabled={busy || !online}
             onClick={() => {
               setBusy(true);
-              void run(
-                () => syncData(prefs),
-                "Sincronización completada",
-              ).finally(() => setBusy(false));
+              void run(async () => {
+                const count = await syncData(prefs);
+                notify(
+                  typeof count === "number" && count > 0
+                    ? `Sincronizados ${count} registros con Firebase`
+                    : "Sincronización completada: tus datos están al día en la nube.",
+                );
+              }).finally(() => setBusy(false));
             }}
           >
             <RefreshCw size={16} className={busy ? "spin" : ""} />
-            {busy ? "Sincronizando…" : "Sincronizar ahora"}
+            {busy ? "Sincronizando…" : "Sincronizar ahora con la nube"}
           </button>
           {prefs.lastSync && (
             <p className="field-help">
@@ -1237,6 +1713,100 @@ export default function App() {
               {new Date(prefs.lastSync).toLocaleString("es-MX")}
             </p>
           )}
+          <hr />
+          <div style={{ margin: "16px 0" }}>
+            <div className="section-row" style={{ marginBottom: "8px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px" }}>Categorías de Gastos</h3>
+              <button
+                type="button"
+                className="text-button"
+                style={{ fontSize: "12px", color: "var(--muted, #94a3b8)" }}
+                onClick={() => {
+                  void run(
+                    () => savePrefs({ customCategories: defaultCategories }),
+                    "Categorías restablecidas a las iniciales",
+                  );
+                }}
+              >
+                Restablecer
+              </button>
+            </div>
+            <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
+              Agrega o elimina categorías para personalizar tu registro de gastos.
+            </p>
+
+            <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
+              <input
+                type="text"
+                id="settings-cat-input"
+                placeholder="Ej. Gimnasio, Mascotas..."
+                maxLength={25}
+                style={{ flex: 1, padding: "8px 12px" }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const target = e.currentTarget;
+                    if (target.value.trim()) {
+                      void handleAddCategory(target.value.trim());
+                      target.value = "";
+                    }
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="secondary"
+                style={{ padding: "0 14px", flexShrink: 0 }}
+                onClick={() => {
+                  const input = document.getElementById(
+                    "settings-cat-input",
+                  ) as HTMLInputElement;
+                  if (input && input.value.trim()) {
+                    void handleAddCategory(input.value.trim());
+                    input.value = "";
+                  }
+                }}
+              >
+                <Plus size={16} /> Agregar
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {availableCategories.map((cat) => (
+                <span
+                  key={cat}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "rgba(255, 255, 255, 0.08)",
+                    border: "1px solid rgba(255, 255, 255, 0.12)",
+                    borderRadius: "999px",
+                    padding: "6px 12px",
+                    fontSize: "13px",
+                  }}
+                >
+                  <span>{cat}</span>
+                  <button
+                    type="button"
+                    aria-label={`Eliminar categoría ${cat}`}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--muted, #94a3b8)",
+                      cursor: "pointer",
+                      padding: 0,
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                    onClick={() => void handleDeleteCategory(cat)}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
           <hr />
           <h3>Respaldo y portabilidad</h3>
           <p className="field-help">
@@ -1313,6 +1883,37 @@ export default function App() {
               una vez para preparar el uso sin conexión.
             </p>
           )}
+          <hr />
+          <div style={{ margin: "16px 0" }}>
+            <h3 style={{ color: "#ef4444", display: "flex", alignItems: "center", gap: "8px", margin: "0 0 6px 0", fontSize: "16px" }}>
+              <Trash2 size={18} /> Restablecer desde cero
+            </h3>
+            <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
+              Elimina de forma definitiva todos los gastos, ingresos, cuentas, gastos fijos y deudas guardados en este dispositivo y en la nube.
+            </p>
+            <button
+              type="button"
+              className="danger-btn full"
+              style={{
+                background: "rgba(239, 68, 68, 0.12)",
+                color: "#f87171",
+                border: "1px solid rgba(239, 68, 68, 0.35)",
+                padding: "10px 16px",
+                borderRadius: "10px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                fontWeight: 600,
+                cursor: "pointer",
+                width: "100%",
+              }}
+              disabled={busy}
+              onClick={handleWipeAllData}
+            >
+              <Trash2 size={16} /> Restablecer y borrar datos de la cuenta
+            </button>
+          </div>
         </Modal>
       )}
     </div>
@@ -1325,6 +1926,8 @@ function EntryForm({
   accounts,
   date,
   entries,
+  categories: activeCategories = defaultCategories,
+  onAddCategory,
   onSave,
   onError,
 }: {
@@ -1334,6 +1937,8 @@ function EntryForm({
   accounts: Entry[];
   date: string;
   entries: Entry[];
+  categories?: string[];
+  onAddCategory?: (name: string) => Promise<void>;
   onSave: () => void;
   onError: (s: string) => void;
 }) {
@@ -1345,6 +1950,8 @@ function EntryForm({
       entry?.direction || "expense",
     ),
     [saving, setSaving] = useState(false),
+    [addingCat, setAddingCat] = useState(false),
+    [newCatName, setNewCatName] = useState(""),
     [errorMessage, setErrorMessage] = useState("");
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1352,9 +1959,15 @@ function EntryForm({
     setSaving(true);
     try {
       const f = new FormData(e.currentTarget),
-        value = Number(amount),
-        title = String(f.get("title")).trim();
-      if (!title) throw new Error("Escribe un concepto.");
+        value = Number(amount);
+      let title = String(f.get("title") || "").trim();
+      if (!title) {
+        if (kind === "transaction") {
+          title = category || (direction === "income" ? "Ingreso" : "Gasto");
+        } else {
+          throw new Error(kind === "account" ? "Escribe un nombre de cuenta." : "Escribe un concepto.");
+        }
+      }
       if (
         !Number.isFinite(value) ||
         value < 0 ||
@@ -1478,7 +2091,7 @@ function EntryForm({
           name="title"
           placeholder={
             kind === "transaction"
-              ? "¿En qué lo usaste?"
+              ? "¿En qué lo usaste? (opcional)"
               : kind === "fixed"
                 ? "Ej. Internet en casa"
                 : kind === "debt"
@@ -1486,7 +2099,7 @@ function EntryForm({
                   : "Ej. Débito BBVA"
           }
           defaultValue={entry?.title || (debt ? `Abono · ${debt.title}` : "")}
-          required
+          required={kind !== "transaction"}
           maxLength={100}
         />
       </label>
@@ -1534,7 +2147,7 @@ function EntryForm({
         <>
           <label>Categoría</label>
           <div className="chips">
-            {categories
+            {activeCategories
               .filter((c) => kind !== "fixed" || c !== "Nómina")
               .map((c) => (
                 <button
@@ -1544,6 +2157,82 @@ function EntryForm({
                   onClick={() => setCategory(c)}
                 >
                   {c}
+                </button>
+              ))}
+            {onAddCategory &&
+              (addingCat ? (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                >
+                  <input
+                    type="text"
+                    placeholder="Nueva..."
+                    value={newCatName}
+                    onChange={(e) => setNewCatName(e.target.value)}
+                    maxLength={25}
+                    autoFocus
+                    style={{
+                      width: "105px",
+                      padding: "4px 8px",
+                      fontSize: "13px",
+                    }}
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const val = newCatName.trim();
+                        if (val) {
+                          await onAddCategory(val);
+                          setCategory(val);
+                          setNewCatName("");
+                          setAddingCat(false);
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    style={{ padding: "4px 8px" }}
+                    onClick={async () => {
+                      const val = newCatName.trim();
+                      if (val) {
+                        await onAddCategory(val);
+                        setCategory(val);
+                        setNewCatName("");
+                        setAddingCat(false);
+                      }
+                    }}
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="text-button"
+                    style={{ padding: "4px" }}
+                    onClick={() => setAddingCat(false)}
+                  >
+                    <X size={14} />
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  style={{
+                    border: "1px dashed rgba(255, 255, 255, 0.35)",
+                    background: "transparent",
+                    color: "#38bdf8",
+                    padding: "6px 12px",
+                    borderRadius: "999px",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => setAddingCat(true)}
+                >
+                  + Nueva
                 </button>
               ))}
           </div>
@@ -1578,51 +2267,6 @@ function EntryForm({
             />
           </label>
         </div>
-      )}
-      {kind === "transaction" && (
-        <details className="keypad-disclosure">
-          <summary>Teclado rápido</summary>
-          <div className="keypad" aria-label="Teclado numérico">
-            {[
-              "1",
-              "2",
-              "3",
-              "4",
-              "5",
-              "6",
-              "7",
-              "8",
-              "9",
-              ".",
-              "0",
-              "borrar",
-            ].map((key) => (
-              <button
-                type="button"
-                aria-label={key === "borrar" ? "Borrar último dígito" : key}
-                key={key}
-                onClick={() =>
-                  setAmount((v) =>
-                    key === "borrar"
-                      ? v.slice(0, -1)
-                      : key === "."
-                        ? v.includes(".")
-                          ? v
-                          : (v || "0") + "."
-                        : v.length < 12 &&
-                            (!v.includes(".") || v.split(".")[1].length < 2)
-                          ? v === "0"
-                            ? key
-                            : v + key
-                          : v,
-                  )
-                }
-              >
-                {key === "borrar" ? <Delete size={20} /> : key}
-              </button>
-            ))}
-          </div>
-        </details>
       )}
       <p className="form-error" role="alert">
         {errorMessage}

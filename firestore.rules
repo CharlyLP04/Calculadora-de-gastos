@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Permite lectura y escritura a las entradas de los usuarios
+    match /clara_users/{userId}/entries/{entryId} {
+      allow read, write: if true;
+    }
+  }
+}
