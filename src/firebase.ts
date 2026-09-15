@@ -282,6 +282,13 @@ export function setupFirestoreRealtime(prefs?: Prefs, onUpdated?: () => void): (
   };
 }
 
+export function stopFirestoreRealtime(): void {
+  if (unsubscribeSnapshot) {
+    unsubscribeSnapshot();
+    unsubscribeSnapshot = null;
+  }
+}
+
 export async function clearCloudEntries(
   targetUidOrPrefs?: string | null | Prefs,
   optionalPrefs?: Prefs,

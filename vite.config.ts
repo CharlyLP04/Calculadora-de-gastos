@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: "prompt",
+      registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
         name: "Clara · Finanzas personales",
@@ -42,6 +42,9 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api/, /^\/__/],
         maximumFileSizeToCacheInBytes: 4000000,
         importScripts: ["sw-notifications.js"],
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
       },
     }),
   ],

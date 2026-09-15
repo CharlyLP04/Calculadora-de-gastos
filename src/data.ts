@@ -206,8 +206,18 @@ export function validEntries(value: unknown): value is Entry[] {
   });
 }
 let syncing = false;
+let syncBlocked = false;
+
+export function setSyncBlocked(blocked: boolean) {
+  syncBlocked = blocked;
+}
+
+export function isSyncBlocked(): boolean {
+  return syncBlocked;
+}
+
 export async function syncData(prefs: Prefs): Promise<number> {
-  if (syncing) return 0;
+  if (syncBlocked || syncing) return 0;
   syncing = true;
   try {
     const { syncWithFirestore } = await import("./firebase");

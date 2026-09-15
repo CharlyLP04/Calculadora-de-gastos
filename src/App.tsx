@@ -64,6 +64,7 @@ import {
   seedDemo,
   syncData,
   wipeAllData,
+  setSyncBlocked,
   type Entry,
   type Prefs,
   type Kind,
@@ -730,12 +731,13 @@ export default function App() {
   const handleWipeAllData = async () => {
     if (
       !confirm(
-        "⚠️ ¿Estás seguro de restablecer desde cero?\n\nEsta acción borrará permanentemente todos tus movimientos, gastos fijos, cuentas, deudas y configuraciones tanto de este equipo como de tu cuenta en la nube de Google.\n\nEsta acción NO se puede deshacer.",
+        "⚠️ ¿Estás seguro de restablecer desde cero?\n\nEsta acción borrará permanentemente todos tus movimientos, gastos fijos, cuentas, deudas y configuraciones tanto de este equipo como de tu cuenta en la nube de Google.\n\nAl completar el borrado, se cerrará tu sesión y volverás a la pantalla de bienvenida.",
       )
     ) {
       return;
     }
     setBusy(true);
+    setSyncBlocked(true);
     try {
       const targetUid =
         currentUser?.uid ||
@@ -747,10 +749,17 @@ export default function App() {
         await clearCloudEntries(targetUid, prefs);
       }
       await wipeAllData();
+      await logoutUser().catch(() => {});
+
+      setCurrentUser(null);
+      setIsGuest(false);
+      localStorage.removeItem("clara_guest_mode");
+      localStorage.removeItem("clara_current_uid");
+      localStorage.removeItem("clara_device_sync_id");
       setSettings(false);
       notify(
-        "Todos los datos han sido borrados de tu cuenta y restablecidos a $0.00.",
-        "DATOS RESTABLECIDOS",
+        "Todos los datos han sido eliminados de la nube y de este dispositivo. Vuelve a iniciar sesión para comenzar en $0.00.",
+        "DATOS BORRADOS",
         "success",
       );
     } catch (e) {
@@ -761,6 +770,7 @@ export default function App() {
         "warning",
       );
     } finally {
+      setSyncBlocked(false);
       setBusy(false);
     }
   };
