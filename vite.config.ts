@@ -41,6 +41,7 @@ export default defineConfig({
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api/, /^\/__/],
         maximumFileSizeToCacheInBytes: 4000000,
+        importScripts: ["sw-notifications.js"],
       },
     }),
   ],

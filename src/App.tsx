@@ -74,6 +74,14 @@ import { loginWithGoogle, logoutUser, subscribeToAuth } from "./auth";
 import { clearCloudEntries } from "./firebase";
 import type { User } from "firebase/auth";
 import { CategoryDonutChart, IncomeExpenseFlow } from "./components/Charts";
+import {
+  showDeviceNotification,
+  requestDeviceNotificationPermission,
+  getDeviceNotificationStatus,
+  isIosDevice,
+  isStandalonePwa,
+  type NotificationStatus,
+} from "./notifications";
 
 type Tab = "Inicio" | "Diario" | "Fijos" | "Balances";
 const icons: Record<string, typeof Wallet> = {
@@ -527,12 +535,8 @@ export default function App() {
     [date, setDate] = useState(today()),
     [online, setOnline] = useState(navigator.onLine),
     [toast, setToast] = useState<IosToastData | null>(null),
-    [notificationPermission, setNotificationPermission] = useState<string>(
-      () =>
-        typeof window !== "undefined" && "Notification" in window
-          ? Notification.permission
-          : "default",
-    ),
+    [notificationPermission, setNotificationPermission] =
+      useState<NotificationStatus>(() => getDeviceNotificationStatus()),
     [settings, setSettings] = useState(false),
     [form, setForm] = useState<{
       kind: Kind;
@@ -642,14 +646,15 @@ export default function App() {
       time: "ahora",
       type: type || "info",
     });
-    if ("Notification" in window && Notification.permission === "granted") {
+    playIosChime();
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
       try {
-        new Notification(title || "Clara · Finanzas", {
-          body: message,
-          icon: "/icon-192.png",
-        });
+        navigator.vibrate([25, 20, 25]);
       } catch {}
     }
+    void showDeviceNotification(title || "Clara · Finanzas", message, {
+      tag: type ? `clara-${type}` : "clara-notification",
+    });
   };
   const run = async (action: () => Promise<unknown>, message?: string) => {
     try {
@@ -2142,60 +2147,173 @@ export default function App() {
           </div>
           <hr />
           <div style={{ margin: "16px 0" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-              <h3 style={{ margin: 0, fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "6px",
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: "16px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
                 <Bell size={16} style={{ color: "var(--accent, #38bdf8)" }} />
-                Notificaciones estilo iOS
+                Notificaciones del Dispositivo
               </h3>
               <span
                 style={{
                   fontSize: "11px",
-                  color: notificationPermission === "granted" ? "#4ade80" : "var(--muted, #94a3b8)",
-                  background: notificationPermission === "granted" ? "rgba(74, 222, 128, 0.1)" : "rgba(255, 255, 255, 0.06)",
-                  padding: "2px 8px",
+                  fontWeight: 600,
+                  color:
+                    notificationPermission === "granted"
+                      ? "#4ade80"
+                      : notificationPermission === "denied"
+                        ? "#f87171"
+                        : "#fbbf24",
+                  background:
+                    notificationPermission === "granted"
+                      ? "rgba(74, 222, 128, 0.12)"
+                      : notificationPermission === "denied"
+                        ? "rgba(248, 113, 113, 0.12)"
+                        : "rgba(251, 191, 36, 0.12)",
+                  padding: "3px 10px",
                   borderRadius: "999px",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
                 }}
               >
-                {notificationPermission === "granted" ? "Activas" : "En pantalla"}
+                {notificationPermission === "granted"
+                  ? "✓ Activas en sistema"
+                  : notificationPermission === "denied"
+                    ? "✕ Bloqueadas"
+                    : "Pendiente de permiso"}
               </span>
             </div>
-            <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
-              Avisos flotantes estilo iPhone con sonido sutil y háptico para pagos fijos, recordatorios y confirmaciones.
+            <p
+              className="field-help"
+              style={{ marginTop: 0, marginBottom: "10px" }}
+            >
+              Recibe avisos en la barra de notificaciones de tu teléfono o
+              pantalla de bloqueo, con vibración háptica y banner flotante estilo
+              iOS.
             </p>
-            <div style={{ display: "flex", gap: "8px" }}>
+
+            {isIosDevice() && !isStandalonePwa() && (
+              <div
+                style={{
+                  background: "rgba(56, 189, 248, 0.08)",
+                  border: "1px solid rgba(56, 189, 248, 0.22)",
+                  borderRadius: "12px",
+                  padding: "10px 12px",
+                  marginBottom: "12px",
+                  fontSize: "12px",
+                  lineHeight: "1.4",
+                  color: "#93c5fd",
+                }}
+              >
+                <strong>📱 Para iPhone / iPad:</strong> Para recibir
+                notificaciones del sistema en pantalla de bloqueo, añade Clara
+                a tu inicio (pulsa <em>Compartir</em> en Safari y elige{" "}
+                <em>“Añadir a pantalla de inicio”</em>).
+              </div>
+            )}
+
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+            >
               {notificationPermission !== "granted" && (
                 <button
                   type="button"
-                  className="secondary"
-                  style={{ flex: 1, fontSize: "13px" }}
+                  className="primary full"
+                  style={{
+                    fontSize: "13px",
+                    padding: "10px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                  }}
                   onClick={async () => {
-                    if ("Notification" in window) {
-                      const res = await Notification.requestPermission();
-                      setNotificationPermission(res);
-                      if (res === "granted") {
-                        notify("Notificaciones del sistema activadas correctamente.", "NOTIFICACIONES", "success");
-                      }
+                    const res = await requestDeviceNotificationPermission();
+                    setNotificationPermission(res);
+                    if (res === "granted") {
+                      notify(
+                        "¡Notificaciones activadas en tu dispositivo! Te avisaremos de pagos y movimientos.",
+                        "CLARA · NOTIFICACIONES",
+                        "success",
+                      );
+                    } else if (res === "denied") {
+                      notify(
+                        "Permiso denegado. Puedes habilitarlo en los ajustes del navegador de tu teléfono.",
+                        "PERMISO REQUERIDO",
+                        "warning",
+                      );
                     }
                   }}
                 >
-                  <Bell size={14} /> Activar en sistema
+                  <Bell size={15} /> Activar notificaciones en mi dispositivo
                 </button>
               )}
-              <button
-                type="button"
-                className="secondary"
-                style={{ flex: 1, fontSize: "13px" }}
-                onClick={() => {
-                  notify(
-                    "📅 Pago próximo: Internet Telmex ($550.00 MXN) vence en 2 días.",
-                    "RECORDATORIO DE PAGO",
-                    "payment",
-                  );
-                }}
-              >
-                <Sparkles size={14} /> Probar aviso iOS
-              </button>
+
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{
+                    flex: 1,
+                    fontSize: "13px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                  }}
+                  onClick={() => {
+                    notify(
+                      "📅 Recordatorio: Pago de Internet Telmex ($550.00 MXN) vence en 2 días.",
+                      "RECORDATORIO DE PAGO",
+                      "payment",
+                    );
+                  }}
+                >
+                  <Sparkles size={14} /> Probar aviso
+                </button>
+
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{
+                    flex: 1,
+                    fontSize: "13px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                  }}
+                  onClick={() => {
+                    if (fixed.length === 0) {
+                      notify(
+                        "No tienes pagos fijos registrados este mes. Puedes agregar uno en la pestaña 'Fijos'.",
+                        "PAGOS DEL MES",
+                        "info",
+                      );
+                    } else {
+                      notify(
+                        `Tienes ${fixed.length} ${fixed.length === 1 ? "compromiso" : "compromisos"} que suman ${money(s.fixed)} MXN este mes.`,
+                        "COMPROMISOS FIJOS",
+                        "payment",
+                      );
+                    }
+                  }}
+                >
+                  <CalendarDays size={14} /> Avisar pagos
+                </button>
+              </div>
             </div>
           </div>
           <hr />
