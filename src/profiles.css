@@ -303,8 +303,19 @@ dialog .ios-banner.is-dismissing {
     inset 0 1px 0 #fff,
     0 4px 16px #0001;
 }
+.create-profile-form {
+  display: grid;
+  gap: 20px;
+}
+.create-profile-form label {
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+}
 .create-profile-form input {
-  margin-top: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0;
   border-radius: 16px;
   height: 56px;
   background: #06131c40;

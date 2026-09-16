@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bell, CalendarDays, Sparkles } from "lucide-react";
+import { Bell, CalendarDays } from "lucide-react";
 import { money, type Prefs } from "./data";
 import {
   getDeviceNotificationStatus,
@@ -52,18 +52,16 @@ export function NotificationSettings({
       setBusy(false);
     }
   };
-  const test = async (payments: boolean) => {
-    const message = payments
-      ? fixedCount
+  const showPayments = async () => {
+    const message = fixedCount
         ? `Tienes ${fixedCount} compromisos este mes${prefs.hidden ? "." : ` por ${money(fixedTotal)}.`}`
-        : "No tienes compromisos fijos registrados en este perfil."
-      : "Todo en orden. Así se verán tus avisos en Clara.";
+        : "No tienes compromisos fijos registrados en este perfil.";
     notify(message);
     if (active)
       await showDeviceNotification(
         `Clara · ${profileName}`,
         prefs.hidden ? "Tienes un aviso en tu perfil de Clara." : message,
-        { tag: `clara-${profileId}-test` },
+        { tag: `clara-${profileId}-payments` },
       );
   };
   return (
@@ -100,10 +98,7 @@ export function NotificationSettings({
           : "Activar avisos de este perfil"}
       </button>
       <div className="button-row">
-        <button className="secondary" onClick={() => void test(false)}>
-          <Sparkles size={16} /> Probar aviso
-        </button>
-        <button className="secondary" onClick={() => void test(true)}>
+        <button className="secondary" onClick={() => void showPayments()}>
           <CalendarDays size={16} /> Ver mis pagos
         </button>
       </div>

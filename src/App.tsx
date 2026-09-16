@@ -61,7 +61,6 @@ import {
   debtRemaining,
   saveEntry,
   removeEntry,
-  seedDemo,
   syncData,
   wipeAllData,
   setSyncBlocked,
@@ -876,25 +875,6 @@ function ProfileApp() {
                   </section>
                 </div>
               </div>
-              {!live.length && (
-                <div className="demo-banner">
-                  <div>
-                    <strong>Este es tu espacio. Hagámoslo tuyo.</strong>
-                    <p>
-                      Registra tu primer movimiento o explora con datos de
-                      ejemplo.
-                    </p>
-                  </div>
-                  <button
-                    className="secondary"
-                    onClick={() =>
-                      void run(seedDemo, "Datos de ejemplo cargados")
-                    }
-                  >
-                    Explorar un ejemplo <ArrowRight size={16} />
-                  </button>
-                </div>
-              )}
             </>
           )}
           {tab === "Diario" && (

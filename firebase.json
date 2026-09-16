@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "mis-finanzas-af0aa",
     "public": "dist",
     "ignore": [
       "firebase.json",
