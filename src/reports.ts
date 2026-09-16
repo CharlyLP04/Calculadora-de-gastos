@@ -182,6 +182,6 @@ export async function restoreBackup(file: File) {
     await db.entries.bulkPut(
       data.entries.map((e: Entry) => ({ ...e, updated: now })),
     );
-    await db.prefs.update("main", { budget: data.budget });
+    await db.prefs.update("main", { budget: data.budget, prefsUpdated: now });
   });
 }

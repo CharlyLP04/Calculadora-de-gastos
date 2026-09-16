@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie";
+import { profileDatabaseName, sessionProfileId } from "./profiles";
 export type Kind = "transaction" | "fixed" | "debt" | "account";
 export interface Entry {
   id: string;
@@ -25,12 +26,14 @@ export interface Prefs {
   firebaseConfig?: string;
   lastSync?: string;
   customCategories?: string[];
+  prefsUpdated?: number;
+  notificationsEnabled?: boolean;
 }
-class Database extends Dexie {
+export class Database extends Dexie {
   entries!: Table<Entry, string>;
   prefs!: Table<Prefs, string>;
-  constructor() {
-    super("crystal-finanzas");
+  constructor(profileId = sessionProfileId || "unselected") {
+    super(profileDatabaseName(profileId));
     this.version(1).stores({ entries: "id,kind,date,updated", prefs: "id" });
   }
 }
@@ -173,7 +176,15 @@ export function validEntries(value: unknown): value is Entry[] {
   if (!Array.isArray(value) || value.length > 100000) return false;
   const ids = new Set<string>();
   return value.every((e) => {
-    if (!e || typeof e.id !== "string" || !e.id || ids.has(e.id)) return false;
+    if (
+      !e ||
+      typeof e.id !== "string" ||
+      !e.id ||
+      e.id.length > 200 ||
+      e.id.includes("/") ||
+      ids.has(e.id)
+    )
+      return false;
     ids.add(e.id);
     return (
       ["transaction", "fixed", "debt", "account"].includes(e.kind) &&
@@ -187,8 +198,12 @@ export function validEntries(value: unknown): value is Entry[] {
       /^\d{4}-\d{2}-\d{2}$/.test(e.date) &&
       typeof e.updated === "number" &&
       Number.isFinite(e.updated) &&
+      e.updated >= 0 &&
+      e.updated <= Number.MAX_SAFE_INTEGER &&
       typeof e.category === "string" &&
+      e.category.length <= 200 &&
       typeof e.account === "string" &&
+      e.account.length <= 200 &&
       (e.direction === undefined ||
         ["income", "expense"].includes(e.direction)) &&
       (e.deleted === undefined || typeof e.deleted === "boolean") &&
@@ -205,25 +220,33 @@ export function validEntries(value: unknown): value is Entry[] {
     );
   });
 }
-let syncing = false;
+let pendingSync: Promise<number> | undefined;
 let syncBlocked = false;
+let syncGeneration = 0;
 
 export function setSyncBlocked(blocked: boolean) {
+  if (blocked) syncGeneration++;
   syncBlocked = blocked;
 }
+export const getSyncGeneration = () => syncGeneration;
+export const waitForSyncIdle = async () => {
+  await pendingSync?.catch(() => {});
+};
 
 export function isSyncBlocked(): boolean {
   return syncBlocked;
 }
 
 export async function syncData(prefs: Prefs): Promise<number> {
-  if (syncBlocked || syncing) return 0;
-  syncing = true;
+  if (syncBlocked) throw new Error("La sincronización está pausada.");
+  if (pendingSync) return pendingSync;
+  pendingSync = import("./firebase").then(({ syncWithFirestore }) =>
+    syncWithFirestore(prefs),
+  );
   try {
-    const { syncWithFirestore } = await import("./firebase");
-    return await syncWithFirestore(prefs);
+    return await pendingSync;
   } finally {
-    syncing = false;
+    pendingSync = undefined;
   }
 }
 export async function seedDemo() {
@@ -330,13 +353,21 @@ export async function seedDemo() {
   ].map((e) => ({ ...base, ...e }) as Entry);
   await db.transaction("rw", db.entries, db.prefs, async () => {
     await db.entries.bulkPut(records);
-    await db.prefs.put({ ...defaults, budget: 22000 });
+    await db.prefs.put({
+      ...defaults,
+      budget: 22000,
+      prefsUpdated: Date.now(),
+    });
   });
 }
 
 export async function wipeAllData(): Promise<void> {
   await db.transaction("rw", db.entries, db.prefs, async () => {
-    await db.entries.clear();
-    await db.prefs.put({ ...defaults, id: "main" });
+    const now = Date.now();
+    const entries = await db.entries.toArray();
+    await db.entries.bulkPut(
+      entries.map((entry) => ({ ...entry, deleted: true, updated: now })),
+    );
+    await db.prefs.put({ ...defaults, id: "main", prefsUpdated: now });
   });
 }

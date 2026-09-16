@@ -1,11 +1,68 @@
 rules_version = '2';
+// clara_users/{Google UID}/profiles/{cloud profile ID}: name (1..40), created (ms).
+// entries/{id}: Entry in src/data.ts, bounded MXN amounts, date YYYY-MM-DD,
+// updated timestamp, optional debt fields and deletion tombstone.
+// preferences/main: budget, customCategories (bounded list), updated timestamp.
+// UID is immutable in the path. Legacy /entries is owner-readable for recovery.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /clara_users/{userId} {
-      allow read, write: if true;
-      match /{allChildren=**} {
-        allow read, write: if true;
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+    function amount(n) { return n is number && n >= 0 && n <= 1000000000000; }
+    function time(n) { return n is number && n >= 0 && n <= 9007199254740991; }
+    function text(s, max) { return s is string && s.size() <= max; }
+    function validProfile(d) {
+      return d.keys().hasAll(['name','created']) && d.keys().hasOnly(['name','created'])
+        && text(d.name,40) && d.name.size() > 0 && time(d.created);
+    }
+    function validEntry(d, id) {
+      return d.keys().hasAll(['id','kind','title','amount','date','category','account','updated'])
+        && d.keys().hasOnly(['id','kind','title','amount','date','category','account','updated','deleted','direction','debtId','total','initialPaid','monthly'])
+        && d.id == id && text(d.id,200) && d.id.size() > 0
+        && d.kind in ['transaction','fixed','debt','account']
+        && text(d.title,200) && amount(d.amount)
+        && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && text(d.category,200) && text(d.account,200) && time(d.updated)
+        && (!('deleted' in d) || d.deleted is bool)
+        && (!('direction' in d) || d.direction in ['income','expense'])
+        && (!('debtId' in d) || text(d.debtId,200))
+        && (!('total' in d) || amount(d.total))
+        && (!('initialPaid' in d) || amount(d.initialPaid))
+        && (!('monthly' in d) || amount(d.monthly))
+        && (d.kind != 'debt' || (d.total > 0 && d.get('initialPaid',0) <= d.total));
+    }
+    function validPreferences(d) {
+      return d.keys().hasAll(['budget','customCategories','updated'])
+        && d.keys().hasOnly(['budget','customCategories','updated'])
+        && amount(d.budget) && d.customCategories is list && d.customCategories.size() <= 100
+        && time(d.updated);
+    }
+    match /clara_users/{uid}/profiles/{profileId} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && validProfile(request.resource.data);
+      allow update: if owner(uid) && validProfile(request.resource.data)
+        && request.resource.data.created == resource.data.created;
+      match /entries/{entryId} {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && validEntry(request.resource.data, entryId);
+        allow update: if owner(uid) && validEntry(request.resource.data, entryId)
+          && request.resource.data.updated >= resource.data.updated;
+      }
+      match /preferences/{id} {
+        allow read: if owner(uid) && id == 'main';
+        allow create: if owner(uid) && id == 'main' && validPreferences(request.resource.data);
+        allow update: if owner(uid) && id == 'main' && validPreferences(request.resource.data)
+          && request.resource.data.updated >= resource.data.updated;
       }
     }
+    match /clara_users/{uid}/entries/{entryId} {
+      allow read: if owner(uid);
+    }
+    match /clara_users/{uid} {
+      allow read: if owner(uid);
+    }
+    // Default deny for everything else, including hard deletes.
   }
 }

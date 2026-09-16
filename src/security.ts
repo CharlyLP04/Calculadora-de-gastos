@@ -1,5 +1,6 @@
 // Device-local WebAuthn gate. This deliberately does not claim to encrypt IndexedDB.
-const key = "crystal-device-credential";
+import { sessionProfileId } from "./profiles";
+const key = sessionProfileId === "legacy" ? "crystal-device-credential" : `clara-lock-${sessionProfileId}`;
 const enc = (v: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(v)));
 const dec = (v: string) => Uint8Array.from(atob(v), (c) => c.charCodeAt(0));
 const b64url = (v: Uint8Array) =>

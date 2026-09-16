@@ -1,3 +1,5 @@
+import { DateStrip, IosNotificationBanner } from "./UIEnhancements";
+import { NotificationSettings } from "./NotificationSettings";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BrandMark } from "./Brand";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -44,8 +46,6 @@ import {
   Delete,
   LogOut,
   LogIn,
-  Sparkles,
-  Bell,
 } from "lucide-react";
 import {
   db,
@@ -65,6 +65,7 @@ import {
   syncData,
   wipeAllData,
   setSyncBlocked,
+  waitForSyncIdle,
   type Entry,
   type Prefs,
   type Kind,
@@ -72,17 +73,16 @@ import {
 import { exportReport, restoreBackup } from "./reports";
 import { enableLock, unlock, disableLock, hasLock } from "./security";
 import { loginWithGoogle, logoutUser, subscribeToAuth } from "./auth";
-import { clearCloudEntries } from "./firebase";
+import { ProfileGate, Credits, GoogleMark } from "./ProfileGate";
+import {
+  activeProfile,
+  chooseProfile,
+  linkProfile,
+  pauseCloud,
+  cloudScope,
+} from "./profiles";
 import type { User } from "firebase/auth";
 import { CategoryDonutChart, IncomeExpenseFlow } from "./components/Charts";
-import {
-  showDeviceNotification,
-  requestDeviceNotificationPermission,
-  getDeviceNotificationStatus,
-  isIosDevice,
-  isStandalonePwa,
-  type NotificationStatus,
-} from "./notifications";
 
 type Tab = "Inicio" | "Diario" | "Fijos" | "Balances";
 const icons: Record<string, typeof Wallet> = {
@@ -138,406 +138,23 @@ function Modal({
     </dialog>
   );
 }
-function playIosChime() {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.12);
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.38);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.4);
-  } catch {}
-}
-
-export interface IosToastData {
-  title?: string;
-  message: string;
-  time?: string;
-  type?: "info" | "success" | "warning" | "payment";
-}
-
-function IosNotificationBanner({
-  toast,
-  onClose,
-}: {
-  toast: IosToastData;
-  onClose: () => void;
-}) {
-  const [dismissing, setDismissing] = useState(false);
-  const startY = useRef(0);
-
-  useEffect(() => {
-    playIosChime();
-    if ("vibrate" in navigator) {
-      try {
-        navigator.vibrate?.([30, 40, 30]);
-      } catch {}
-    }
-  }, []);
-
-  const handleDismiss = () => {
-    setDismissing(true);
-    setTimeout(onClose, 250);
-  };
-
-  return (
-    <div
-      className={`ios-banner ${dismissing ? "is-dismissing" : ""}`}
-      role="status"
-      onTouchStart={(e) => {
-        startY.current = e.touches[0].clientY;
-      }}
-      onTouchMove={(e) => {
-        if (startY.current - e.touches[0].clientY > 25) {
-          handleDismiss();
-        }
-      }}
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest(".ios-banner-close")) return;
-        handleDismiss();
-      }}
-    >
-      <div className="ios-banner-header">
-        <div className="ios-banner-app">
-          <div className="ios-banner-icon">
-            <BrandMark />
-          </div>
-          <span className="ios-banner-title">{toast.title || "CLARA · FINANZAS"}</span>
-        </div>
-        <div className="ios-banner-meta">
-          <span className="ios-banner-time">{toast.time || "ahora"}</span>
-          <button
-            type="button"
-            className="ios-banner-close"
-            aria-label="Cerrar aviso"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDismiss();
-            }}
-          >
-            <X size={12} />
-          </button>
-        </div>
-      </div>
-      <div className="ios-banner-body">
-        <p className="ios-banner-message">{toast.message}</p>
-      </div>
-      <div className="ios-banner-handle" />
-    </div>
-  );
-}
-
-function LoginScreen({
-  onLoginWithGoogle,
-  onContinueAsGuest,
-  busy,
-  online,
-  toast,
-  onDismissToast,
-}: {
-  onLoginWithGoogle: () => void;
-  onContinueAsGuest: () => void;
-  busy: boolean;
-  online: boolean;
-  toast?: IosToastData | null;
-  onDismissToast?: () => void;
-}) {
-  return (
-    <div className="login-screen-wrap">
-      <div className="login-card">
-        <div className="login-brand">
-          <div className="login-brand-icon">
-            <BrandMark />
-          </div>
-          <h1 className="login-title">clara</h1>
-          <p className="login-tagline">Finanzas personales claras y privadas</p>
-        </div>
-
-        <div className="login-features">
-          <div className="login-feat-item">
-            <span className="login-feat-dot" />
-            <span>Control de tus gastos, cuentas y metas</span>
-          </div>
-          <div className="login-feat-item">
-            <span className="login-feat-dot" />
-            <span>100% privado y offline-first en tu dispositivo</span>
-          </div>
-          <div className="login-feat-item">
-            <span className="login-feat-dot" />
-            <span>Sincronización en la nube con Google</span>
-          </div>
-        </div>
-
-        <div className="login-actions">
-          <button
-            type="button"
-            className="google-login-btn primary full"
-            style={{
-              width: "100%",
-              justifyContent: "center",
-              padding: "12px 16px",
-              fontSize: "15px",
-            }}
-            disabled={busy || !online}
-            onClick={onLoginWithGoogle}
-          >
-            <svg className="google-icon-svg" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-              />
-            </svg>
-            Continuar con Google
-          </button>
-
-          <button
-            type="button"
-            className="secondary full"
-            style={{
-              width: "100%",
-              padding: "12px 16px",
-              fontSize: "14px",
-              marginTop: "10px",
-            }}
-            disabled={busy}
-            onClick={onContinueAsGuest}
-          >
-            Continuar como invitado (Modo local)
-          </button>
-        </div>
-
-        <p className="login-footnote">
-          En modo invitado tus datos se guardan exclusivamente en este dispositivo.
-        </p>
-
-        {toast && (
-          <IosNotificationBanner
-            toast={toast}
-            onClose={onDismissToast || (() => {})}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-function DateStrip({
-  month,
-  date,
-  entries,
-  budget,
-  onSelectDate,
-  dateStripRef,
-}: {
-  month: string;
-  date: string;
-  entries: Entry[];
-  budget: number;
-  onSelectDate: (d: string) => void;
-  dateStripRef: React.RefObject<HTMLDivElement | null>;
-}) {
-  const isDragging = useRef(false);
-  const startX = useRef(0);
-  const scrollLeftStart = useRef(0);
-  const hasDragged = useRef(false);
-  const lastX = useRef(0);
-  const lastTime = useRef(0);
-  const velocity = useRef(0);
-  const momentumRaf = useRef<number | null>(null);
-
-  const stopMomentum = () => {
-    if (momentumRaf.current !== null) {
-      cancelAnimationFrame(momentumRaf.current);
-      momentumRaf.current = null;
-    }
-  };
-
-  // Auto-center selected date when date or month changes
-  useEffect(() => {
-    const el = dateStripRef.current;
-    if (!el) return;
-    const selected = el.querySelector(
-      `button[data-day="${date}"]`,
-    ) as HTMLElement | null;
-    if (selected) {
-      const targetLeft =
-        selected.offsetLeft -
-        el.offsetLeft -
-        el.clientWidth / 2 +
-        selected.clientWidth / 2;
-      el.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
-    }
-  }, [date, month, dateStripRef]);
-
-  // Convert mouse wheel vertically to horizontal scroll
-  useEffect(() => {
-    const el = dateStripRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (Math.abs(e.deltaY) > Math.abs(e.deltaX) || e.deltaY !== 0) {
-        e.preventDefault();
-        stopMomentum();
-        el.scrollBy({ left: e.deltaY * 1.3, behavior: "smooth" });
-      }
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [dateStripRef]);
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const el = dateStripRef.current;
-    if (!el) return;
-    if (e.button !== 0 && e.pointerType === "mouse") return;
-
-    stopMomentum();
-    isDragging.current = true;
-    hasDragged.current = false;
-    startX.current = e.clientX;
-    lastX.current = e.clientX;
-    lastTime.current = performance.now();
-    velocity.current = 0;
-    scrollLeftStart.current = el.scrollLeft;
-
-    try {
-      el.setPointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
-    el.classList.add("is-dragging");
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const el = dateStripRef.current;
-    if (!isDragging.current || !el) return;
-
-    const now = performance.now();
-    const dt = Math.max(1, now - lastTime.current);
-    const dx = e.clientX - lastX.current;
-
-    velocity.current = dx / dt;
-    lastX.current = e.clientX;
-    lastTime.current = now;
-
-    const totalWalk = e.clientX - startX.current;
-    if (Math.abs(totalWalk) > 5) {
-      hasDragged.current = true;
-    }
-
-    el.scrollLeft = scrollLeftStart.current - totalWalk;
-  };
-
-  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging.current) return;
-    isDragging.current = false;
-    const el = dateStripRef.current;
-    if (!el) return;
-
-    try {
-      if (el.hasPointerCapture(e.pointerId)) {
-        el.releasePointerCapture(e.pointerId);
-      }
-    } catch {
-      // ignore
-    }
-
-    el.classList.remove("is-dragging");
-
-    // Carousel inertia / momentum glide
-    let v = velocity.current * 16;
-    if (Math.abs(v) > 40) v = Math.sign(v) * 40;
-
-    if (Math.abs(v) > 1.2) {
-      const stepGlide = () => {
-        if (!dateStripRef.current) return;
-        dateStripRef.current.scrollLeft -= v;
-        v *= 0.93; // carousel deceleration
-        if (Math.abs(v) > 0.6) {
-          momentumRaf.current = requestAnimationFrame(stepGlide);
-        } else {
-          momentumRaf.current = null;
-        }
-      };
-      momentumRaf.current = requestAnimationFrame(stepGlide);
-    }
-  };
-
-  const daysCount = daysInMonth(month);
-
-  return (
-    <div
-      ref={dateStripRef}
-      className="date-strip"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-    >
-      {Array.from({ length: daysCount }, (_, i) => {
-        const day = month + "-" + String(i + 1).padStart(2, "0");
-        const ds = summarize(entries, month, day, budget);
-        const isSelected = day === date;
-
-        return (
-          <button
-            type="button"
-            data-day={day}
-            className={isSelected ? "selected" : ""}
-            key={day}
-            onClick={() => {
-              if (!hasDragged.current) {
-                onSelectDate(day);
-              }
-            }}
-          >
-            <span>
-              {new Date(day + "T12:00:00").toLocaleDateString("es-MX", {
-                weekday: "short",
-              })}
-            </span>
-            <strong>{String(i + 1).padStart(2, "0")}</strong>
-            <i
-              className={
-                ds.dayTx.length
-                  ? ds.dayExpense > ds.allowance
-                    ? "red-dot"
-                    : "green-dot"
-                  : ""
-              }
-            />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 export default function App() {
+  return (
+    <ProfileGate>
+      <ProfileApp />
+    </ProfileGate>
+  );
+}
+function ProfileApp() {
+  const profile = useLiveQuery(activeProfile, []);
+  const dateStripRef = useRef<HTMLDivElement>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const entries = useLiveQuery(() => db.entries.toArray(), []) || [];
   const prefs = useLiveQuery(() => db.prefs.get("main"), []) || defaults;
   const [tab, setTab] = useState<Tab>("Inicio"),
     [date, setDate] = useState(today()),
     [online, setOnline] = useState(navigator.onLine),
-    [toast, setToast] = useState<IosToastData | null>(null),
-    [notificationPermission, setNotificationPermission] =
-      useState<NotificationStatus>(() => getDeviceNotificationStatus()),
+    [toast, setToast] = useState(""),
     [settings, setSettings] = useState(false),
     [form, setForm] = useState<{
       kind: Kind;
@@ -552,83 +169,10 @@ export default function App() {
     [simDebt, setSimDebt] = useState<Entry | null>(null),
     [extra, setExtra] = useState("500"),
     [currentUser, setCurrentUser] = useState<User | null>(null),
-    [isGuest, setIsGuest] = useState<boolean>(
-      () => localStorage.getItem("clara_guest_mode") === "true",
-    ),
-    [authChecking, setAuthChecking] = useState(true),
-    [checkingUpdate, setCheckingUpdate] = useState(false);
-  const dateStripRef = useRef<HTMLDivElement>(null);
-
-  const handleCheckUpdate = async () => {
-    if (!online) {
-      notify("Estás sin conexión a internet.");
-      return;
-    }
-    setCheckingUpdate(true);
-    try {
-      if ("serviceWorker" in navigator) {
-        const reg = await navigator.serviceWorker.getRegistration();
-        if (reg) {
-          await reg.update();
-
-          if (reg.waiting) {
-            notify("¡Nueva versión lista! Actualizando aplicación…");
-            window.dispatchEvent(new Event("pwa-apply-update"));
-            return;
-          }
-
-          if (reg.installing) {
-            notify("Descargando actualización en segundo plano…");
-            reg.installing.addEventListener("statechange", function () {
-              if (this.state === "installed") {
-                window.dispatchEvent(new Event("pwa-apply-update"));
-              }
-            });
-            return;
-          }
-        }
-      }
-
-      try {
-        await fetch(`/?_t=${Date.now()}`, { method: "HEAD", cache: "no-store" });
-      } catch {}
-
-      await new Promise((r) => setTimeout(r, 650));
-      notify("✅ Tienes la versión más reciente de Clara.");
-    } catch (e) {
-      console.warn("Error al buscar actualizaciones:", e);
-      notify("✅ Tu aplicación está al día.");
-    } finally {
-      setCheckingUpdate(false);
-    }
-  };
-
-  useEffect(() => {
-    return subscribeToAuth(async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        setIsGuest(false);
-        localStorage.setItem("clara_guest_mode", "false");
-        const prevUid = localStorage.getItem("clara_current_uid");
-        if (prevUid && prevUid !== "guest" && prevUid !== user.uid) {
-          // Switched to a different Google account: clear local database to prevent cross-contamination
-          await db.entries.clear();
-          await db.prefs.put({ ...defaults, id: "main" });
-        }
-        localStorage.setItem("clara_current_uid", user.uid);
-        void syncData(prefs).catch(() => {});
-      } else {
-        // User logged out
-        const prevUid = localStorage.getItem("clara_current_uid");
-        if (prevUid && prevUid !== "guest") {
-          await db.entries.clear();
-          await db.prefs.put({ ...defaults, id: "main" });
-          localStorage.removeItem("clara_current_uid");
-        }
-      }
-      setAuthChecking(false);
-    });
-  }, [prefs]);
+    [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "error">(
+      "idle",
+    );
+  useEffect(() => subscribeToAuth(setCurrentUser), []);
   const month = date.slice(0, 7),
     live = entries.filter((e) => !e.deleted),
     s = summarize(entries, month, date, prefs.budget),
@@ -636,27 +180,7 @@ export default function App() {
     debts = live.filter((e) => e.kind === "debt"),
     accounts = live.filter((e) => e.kind === "account");
   const fmt = (n: number) => (prefs.hidden ? "$ ••••••" : money(n));
-  const notify = (
-    message: string,
-    title?: string,
-    type?: "info" | "success" | "warning" | "payment",
-  ) => {
-    setToast({
-      title: title || "CLARA · FINANZAS",
-      message,
-      time: "ahora",
-      type: type || "info",
-    });
-    playIosChime();
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      try {
-        navigator.vibrate([25, 20, 25]);
-      } catch {}
-    }
-    void showDeviceNotification(title || "Clara · Finanzas", message, {
-      tag: type ? `clara-${type}` : "clara-notification",
-    });
-  };
+  const notify = (message: string) => setToast(message);
   const run = async (action: () => Promise<unknown>, message?: string) => {
     try {
       await action();
@@ -667,22 +191,36 @@ export default function App() {
       );
     }
   };
-  const savePrefs = async (change: Partial<Prefs>) => {
-    await db.prefs.put({ ...prefs, ...change });
-    if (currentUser) {
-      import("./firebase")
-        .then(async ({ getFirebaseApp }) => {
-          const { getFirestore, doc, setDoc } = await import("firebase/firestore");
-          const app = getFirebaseApp();
-          if (app) {
-            const firestore = getFirestore(app);
-            const updatePayload: Record<string, any> = { updatedAt: new Date().toISOString() };
-            if (change.budget !== undefined) updatePayload.budget = change.budget;
-            if (change.customCategories !== undefined) updatePayload.customCategories = change.customCategories;
-            await setDoc(doc(firestore, "clara_users", currentUser.uid), updatePayload, { merge: true }).catch(() => {});
-          }
-        })
-        .catch(() => {});
+  const savePrefs = async (change: Partial<Prefs>) =>
+    db.transaction("rw", db.prefs, async () => {
+      const current = (await db.prefs.get("main")) || defaults;
+      await db.prefs.put({ ...current, ...change, prefsUpdated: Date.now() });
+    });
+  const handleCheckUpdate = async () => {
+    if (!online) {
+      notify("Conéctate para buscar una actualización.");
+      return;
+    }
+    setCheckingUpdate(true);
+    try {
+      const registration = await navigator.serviceWorker?.getRegistration();
+      if (!registration) {
+        notify("Abre la versión instalada para buscar actualizaciones.");
+        return;
+      }
+      await registration.update();
+      if (registration.waiting) {
+        setUpdate(true);
+        notify("Hay una actualización lista. Puedes aplicarla desde Inicio.");
+      } else if (registration.installing) {
+        notify("Descargando actualización. Te avisaremos cuando esté lista.");
+      } else notify("No hay actualizaciones nuevas disponibles.");
+    } catch {
+      notify(
+        "No pudimos comprobar la versión. Inténtalo cuando tengas conexión.",
+      );
+    } finally {
+      setCheckingUpdate(false);
     }
   };
   const availableCategories = getCategories(prefs);
@@ -690,9 +228,7 @@ export default function App() {
     const trimmed = name.trim();
     if (!trimmed) return;
     if (
-      availableCategories.some(
-        (c) => c.toLowerCase() === trimmed.toLowerCase(),
-      )
+      availableCategories.some((c) => c.toLowerCase() === trimmed.toLowerCase())
     ) {
       notify("Esa categoría ya existe");
       return;
@@ -710,69 +246,46 @@ export default function App() {
     await savePrefs({ customCategories: updated });
     notify(`Categoría “${name}” eliminada`);
   };
+  const handleConnect = async () => {
+    setBusy(true);
+    await run(async () => {
+      const user = await loginWithGoogle();
+      await linkProfile(user.uid, user.email);
+      notify("Google conectado a este perfil. Preparando el respaldo…");
+    });
+    setBusy(false);
+  };
   const handleLogout = async () => {
     setBusy(true);
-    try {
+    await run(async () => {
+      await pauseCloud();
       await logoutUser();
-      await db.entries.clear();
-      await db.prefs.put({ ...defaults, id: "main" });
-      localStorage.removeItem("clara_current_uid");
-      localStorage.removeItem("clara_guest_mode");
-      setCurrentUser(null);
-      setIsGuest(false);
-      setSettings(false);
-      notify("Sesión cerrada correctamente.");
-    } catch (e) {
-      notify(e instanceof Error ? e.message : "Error al cerrar sesión.");
-    } finally {
-      setBusy(false);
-    }
+    }, "Google desconectado. Este perfil sigue guardado aquí.");
+    setBusy(false);
   };
   const handleWipeAllData = async () => {
     if (
       !confirm(
-        "⚠️ ¿Estás seguro de restablecer desde cero?\n\nEsta acción borrará permanentemente todos tus movimientos, gastos fijos, cuentas, deudas y configuraciones tanto de este equipo como de tu cuenta en la nube de Google.\n\nAl completar el borrado, se cerrará tu sesión y volverás a la pantalla de bienvenida.",
+        `¿Vaciar el perfil «${profile?.name}»? Se eliminarán sus movimientos, cuentas, fijos y deudas. Si conectas Google, se reflejará en su respaldo. Los demás perfiles no cambian. Guarda un respaldo antes; no se puede deshacer.`,
       )
-    ) {
+    )
       return;
-    }
     setBusy(true);
     setSyncBlocked(true);
     try {
-      const targetUid =
-        currentUser?.uid ||
-        (typeof localStorage !== "undefined"
-          ? localStorage.getItem("clara_current_uid")
-          : null);
-
-      if (targetUid && targetUid !== "guest") {
-        await clearCloudEntries(targetUid, prefs);
-      }
+      await waitForSyncIdle();
       await wipeAllData();
-      await logoutUser().catch(() => {});
-
-      setCurrentUser(null);
-      setIsGuest(false);
-      localStorage.removeItem("clara_guest_mode");
-      localStorage.removeItem("clara_current_uid");
-      localStorage.removeItem("clara_device_sync_id");
-      setSettings(false);
+      setSyncBlocked(false);
+      if (canSync && online) await syncData(prefs);
+      chooseProfile();
+    } catch {
       notify(
-        "Todos los datos han sido eliminados de la nube y de este dispositivo. Vuelve a iniciar sesión para comenzar en $0.00.",
-        "DATOS BORRADOS",
-        "success",
-      );
-    } catch (e) {
-      console.error("Error al restablecer datos:", e);
-      notify(
-        e instanceof Error ? e.message : "Error al restablecer datos.",
-        "ERROR",
-        "warning",
+        "El perfil se conserva localmente. No se pudo completar la operación en Google; revisa la conexión antes de intentarlo otra vez.",
       );
     } finally {
       setSyncBlocked(false);
-      setBusy(false);
     }
+    setBusy(false);
   };
   useEffect(() => {
     void db.prefs
@@ -810,50 +323,69 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (toast) {
-      const t = setTimeout(() => setToast(null), 5000);
+      const t = setTimeout(() => setToast(""), 5000);
       return () => clearTimeout(t);
     }
   }, [toast]);
-  const canSync = Boolean(
-    currentUser &&
-      online &&
-      (prefs.firebaseConfig ||
-        localStorage.getItem("clara_firebase_config") ||
-        import.meta.env.VITE_FIREBASE_CONFIG ||
-        (import.meta.env.VITE_FIREBASE_API_KEY &&
-          import.meta.env.VITE_FIREBASE_PROJECT_ID)),
+  const canSync = !!cloudScope(profile, currentUser?.uid);
+  const syncingRef = useRef(false);
+  const syncNow = async (manual = false) => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    setSyncStatus("syncing");
+    try {
+      await syncData(prefs);
+      setSyncStatus("idle");
+      if (manual) notify("Este perfil está al día en Google.");
+    } catch (e) {
+      setSyncStatus("error");
+      if (manual)
+        notify(
+          e instanceof Error
+            ? e.message
+            : "No se pudo sincronizar. Tus datos siguen aquí.",
+        );
+    } finally {
+      syncingRef.current = false;
+    }
+  };
+  const lastEntryUpdate = entries.reduce(
+    (max, entry) => Math.max(max, entry.updated),
+    0,
   );
+  const cloudPending =
+    !prefs.lastSync ||
+    Math.max(lastEntryUpdate, prefs.prefsUpdated || 0) >
+      Date.parse(prefs.lastSync);
   useEffect(() => {
-    if (!online || !canSync || locked) return;
-    const t = setTimeout(() => {
-      void syncData(prefs).catch(() => {});
-    }, 2000);
-    return () => clearTimeout(t);
-  }, [online, canSync, prefs, entries, locked]);
+    if (!online || !canSync || locked || busy) return;
+    const timer = setTimeout(() => void syncNow(), 1600);
+    return () => clearTimeout(timer);
+  }, [
+    online,
+    canSync,
+    profile?.googleUid,
+    lastEntryUpdate,
+    entries.length,
+    prefs.prefsUpdated,
+    locked,
+    busy,
+  ]);
+  useEffect(() => {
+    if (!online || !canSync || locked || busy) return;
+    const timer = setInterval(() => void syncNow(), 60000);
+    const focus = () => {
+      if (!document.hidden) void syncNow();
+    };
+    document.addEventListener("visibilitychange", focus);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", focus);
+    };
+  }, [online, canSync, profile?.googleUid, locked, busy]);
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [tab]);
-  useEffect(() => {
-    if (!online || !canSync || locked) return;
-    const timer = setInterval(() => {
-      void syncData(prefs).catch(() => {});
-    }, 60000);
-    return () => clearInterval(timer);
-  }, [online, canSync, prefs, locked]);
-  useEffect(() => {
-    if (!online || locked || !currentUser) return;
-    let cleanup: (() => void) | undefined;
-    import("./firebase")
-      .then(({ isFirebaseConfigured, setupFirestoreRealtime }) => {
-        if (isFirebaseConfigured(prefs)) {
-          cleanup = setupFirestoreRealtime(prefs);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      if (cleanup) cleanup();
-    };
-  }, [online, prefs.firebaseConfig, prefs.syncToken, locked, currentUser]);
   const changeMonth = (value: string) => {
     if (/^\d{4}-\d{2}$/.test(value)) setDate(value + "-01");
   };
@@ -985,51 +517,9 @@ export default function App() {
         >
           <LockKeyhole size={18} /> Desbloquear
         </button>
-        {toast && (
-          <IosNotificationBanner
-            toast={toast}
-            onClose={() => setToast(null)}
-          />
-        )}
+        {toast && <p role="alert">{toast}</p>}
       </div>
     );
-  if (authChecking) {
-    return (
-      <div className="login-screen-wrap">
-        <div className="login-brand-icon" style={{ animation: "pulse 1.5s infinite" }}>
-          <BrandMark />
-        </div>
-      </div>
-    );
-  }
-  if (!currentUser && !isGuest) {
-    return (
-      <LoginScreen
-        onLoginWithGoogle={() => {
-          setBusy(true);
-          void run(
-            async () => {
-              const user = await loginWithGoogle();
-              setCurrentUser(user);
-              setIsGuest(false);
-              localStorage.setItem("clara_guest_mode", "false");
-            },
-            "Sesión iniciada con Google",
-          ).finally(() => setBusy(false));
-        }}
-        onContinueAsGuest={() => {
-          setIsGuest(true);
-          localStorage.setItem("clara_guest_mode", "true");
-          localStorage.setItem("clara_current_uid", "guest");
-          notify("Modo local activado: tus datos se guardarán en este equipo.");
-        }}
-        busy={busy}
-        online={online}
-        toast={toast}
-        onDismissToast={() => setToast(null)}
-      />
-    );
-  }
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1053,98 +543,54 @@ export default function App() {
             <Settings size={18} /> Configuración <ArrowRight size={16} />
           </button>
           <button
-            type="button"
-            className="text-button"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              fontSize: "12px",
-              color: "var(--muted, #94a3b8)",
-              padding: "4px 8px",
-              margin: "2px 0 8px 0",
-              width: "100%",
-              textAlign: "left",
-            }}
-            onClick={handleCheckUpdate}
-            disabled={checkingUpdate || !online}
-            title="Buscar actualizaciones de la aplicación"
+            className="sidebar-profile"
+            onClick={chooseProfile}
+            disabled={busy || syncStatus === "syncing"}
           >
-            <RefreshCw size={13} className={checkingUpdate ? "spin" : ""} />
-            <span>{checkingUpdate ? "Buscando…" : "Buscar actualizaciones"}</span>
+            <span className="profile-monogram">
+              {profile?.name[0].toUpperCase()}
+            </span>
+            <span>
+              <strong>{profile?.name}</strong>
+              <small>Cambiar perfil</small>
+            </span>
+            <ChevronRight size={16} />
           </button>
-          <div className="profile" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            {currentUser?.photoURL ? (
-              <img
-                src={currentUser.photoURL}
-                alt="Avatar"
-                className="avatar"
-                style={{ width: "36px", height: "36px", borderRadius: "50%", objectFit: "cover" }}
-              />
-            ) : (
-              <div className="avatar">
-                {currentUser
-                  ? (currentUser.displayName || currentUser.email || "U")[0].toUpperCase()
-                  : "C"}
-              </div>
-            )}
-            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-              <strong style={{ display: "block", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                {currentUser
-                  ? currentUser.displayName || currentUser.email
-                  : isGuest
-                    ? "Modo Local (Privado)"
-                    : "Mi cuenta"}
-              </strong>
-              <span>
-                {currentUser
-                  ? "Conectado a Google"
-                  : "Moneda · MXN"}
-              </span>
-            </div>
-            {currentUser ? (
-              <button
-                type="button"
-                className="icon-btn"
-                title="Cerrar sesión de Google"
-                style={{ marginLeft: "auto", flexShrink: 0, color: "#ef4444" }}
-                onClick={() => {
-                  if (confirm("¿Cerrar sesión de Google?")) {
-                    void handleLogout();
-                  }
-                }}
-              >
-                <LogOut size={16} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="icon-btn"
-                title="Iniciar sesión con Google"
-                style={{ marginLeft: "auto", flexShrink: 0, color: "var(--accent, #38bdf8)" }}
-                onClick={() => setSettings(true)}
-              >
-                <LogIn size={16} />
-              </button>
-            )}
-          </div>
         </div>
       </aside>
       <main>
         <header className="topbar">
           <span className="mobile-brand">
-            <BrandMark /> clara
+            <BrandMark />
+            <span>
+              clara
+              <small className="mobile-profile-name">{profile?.name}</small>
+            </span>
           </span>
           <div className={`connection ${online ? "" : "offline"}`}>
-            {online ? <Cloud size={14} /> : <CloudOff size={14} />}
+            {canSync ? <Cloud size={14} /> : <Smartphone size={14} />}
             <span>
-              {online
-                ? "Guardado en tu dispositivo"
-                : "Sin conexión · guardado local"}
+              {!online
+                ? "Sin conexión · guardado aquí"
+                : canSync && syncStatus === "error"
+                  ? "Guardado aquí · nube pendiente"
+                  : syncStatus === "syncing"
+                    ? "Guardando en Google…"
+                    : canSync
+                      ? cloudPending
+                        ? "Guardado aquí · nube pendiente"
+                        : "Guardado aquí y en Google"
+                      : "Guardado en este perfil"}
             </span>
           </div>
           <div className="top-actions">
             <label className="month-picker">
+              <span className="month-display">
+                {new Date(month + "-02T12:00:00").toLocaleDateString("es-MX", {
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
               <CalendarDays size={16} />
               <input
                 aria-label="Mes del resumen"
@@ -1154,35 +600,14 @@ export default function App() {
               />
               <ChevronDown size={14} />
             </label>
-            {currentUser ? (
-              <button
-                className="icon-btn"
-                title={`Sesión de ${currentUser.email}. Toca para cerrar sesión.`}
-                onClick={() => {
-                  if (confirm(`¿Cerrar sesión de Google (${currentUser.email})?`)) {
-                    void handleLogout();
-                  }
-                }}
-              >
-                {currentUser.photoURL ? (
-                  <img
-                    src={currentUser.photoURL}
-                    alt="Avatar"
-                    style={{ width: "22px", height: "22px", borderRadius: "50%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <LogOut size={18} style={{ color: "#ef4444" }} />
-                )}
-              </button>
-            ) : (
-              <button
-                className="icon-btn"
-                title="Iniciar sesión con Google"
-                onClick={() => setSettings(true)}
-              >
-                <LogIn size={18} />
-              </button>
-            )}
+            <button
+              className="header-profile"
+              aria-label={`Cambiar perfil: ${profile?.name}`}
+              onClick={chooseProfile}
+              disabled={busy || syncStatus === "syncing"}
+            >
+              {profile?.name[0].toUpperCase()}
+            </button>
             <button
               className="icon-btn"
               aria-label="Configuración"
@@ -1192,7 +617,7 @@ export default function App() {
             </button>
           </div>
         </header>
-        <div className="content">
+        <div className="content" key={tab}>
           <div className="page-heading">
             <div>
               <h1>
@@ -1475,56 +900,59 @@ export default function App() {
           {tab === "Diario" && (
             <>
               <section className="card calendar-card">
-                <div className="section-row" style={{ marginBottom: "12px" }}>
+                <div className="section-row">
                   <h2>Bitácora diaria</h2>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <div style={{ display: "flex", gap: "4px" }}>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        aria-label="Días anteriores"
-                        title="Días anteriores"
-                        onClick={() =>
-                          dateStripRef.current?.scrollBy({
-                            left: -220,
-                            behavior: "smooth",
-                          })
-                        }
-                      >
-                        <ChevronLeft size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        aria-label="Días siguientes"
-                        title="Días siguientes"
-                        onClick={() =>
-                          dateStripRef.current?.scrollBy({
-                            left: 220,
-                            behavior: "smooth",
-                          })
-                        }
-                      >
-                        <ChevronRight size={18} />
-                      </button>
-                    </div>
-                    <input
-                      type="date"
-                      aria-label="Día seleccionado"
-                      value={date}
-                      onChange={(e) => {
-                        if (e.target.value) setDate(e.target.value);
-                      }}
-                    />
-                  </div>
+                  <input
+                    type="date"
+                    aria-label="Día seleccionado"
+                    value={date}
+                    onChange={(e) => {
+                      if (e.target.value) setDate(e.target.value);
+                    }}
+                  />
+                </div>
+                <div className="date-strip-navigation">
+                  <button
+                    className="icon-btn"
+                    aria-label="Días anteriores"
+                    onClick={() =>
+                      dateStripRef.current?.scrollBy({
+                        left: -240,
+                        behavior: window.matchMedia(
+                          "(prefers-reduced-motion: reduce)",
+                        ).matches
+                          ? "instant"
+                          : "smooth",
+                      })
+                    }
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <span>Desliza para explorar el mes</span>
+                  <button
+                    className="icon-btn"
+                    aria-label="Días siguientes"
+                    onClick={() =>
+                      dateStripRef.current?.scrollBy({
+                        left: 240,
+                        behavior: window.matchMedia(
+                          "(prefers-reduced-motion: reduce)",
+                        ).matches
+                          ? "instant"
+                          : "smooth",
+                      })
+                    }
+                  >
+                    <ChevronRight size={18} />
+                  </button>
                 </div>
                 <DateStrip
-                  dateStripRef={dateStripRef}
                   month={month}
                   date={date}
                   entries={entries}
                   budget={prefs.budget}
-                  onSelectDate={(d) => setDate(d)}
+                  onSelectDate={setDate}
+                  dateStripRef={dateStripRef}
                 />
               </section>
               <div className="stat-grid">
@@ -1821,10 +1249,11 @@ export default function App() {
         </div>
       </main>
       {nav(true)}
-      {toast && (
+      {toast && !settings && (
         <IosNotificationBanner
-          toast={toast}
-          onClose={() => setToast(null)}
+          key={toast}
+          toast={{ message: toast }}
+          onClose={() => setToast("")}
         />
       )}
       {form && (
@@ -1925,147 +1354,84 @@ export default function App() {
       {settings && (
         <Modal title="Configuración" onClose={() => setSettings(false)}>
           {toast && (
-            <p className="inline-notice" role="status">
-              {toast.message}
-            </p>
+            <IosNotificationBanner
+              key={toast}
+              toast={{ message: toast }}
+              onClose={() => setToast("")}
+            />
           )}
 
-          {/* Apartado de Perfil */}
-          <div className="google-auth-card" style={{ marginBottom: "20px" }}>
-            <div className="section-row" style={{ marginBottom: "10px" }}>
-              <h3 style={{ margin: 0, fontSize: "16px" }}>👤 Perfil</h3>
-              <span
-                className="savings-badge"
-                style={{
-                  background: currentUser
-                    ? "rgba(16, 185, 129, 0.15)"
-                    : "rgba(56, 189, 248, 0.15)",
-                  color: currentUser ? "#34d399" : "#38bdf8",
-                }}
-              >
-                {currentUser ? "Google Conectado" : "Modo Invitado"}
+          <section className="profile-settings glass-surface">
+            <div className="profile-settings-heading">
+              <span className="profile-monogram">
+                {profile?.name[0].toUpperCase()}
               </span>
-            </div>
-
-            <div className="user-profile-header">
-              {currentUser?.photoURL ? (
-                <img
-                  src={currentUser.photoURL}
-                  alt={currentUser.displayName || "Usuario"}
-                  className="user-avatar"
-                />
-              ) : (
-                <div
-                  className="user-avatar"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: currentUser ? "#3b82f6" : "rgba(255, 255, 255, 0.12)",
-                    fontWeight: "bold",
-                  }}
-                >
-                  {(
-                    currentUser?.displayName ||
-                    currentUser?.email ||
-                    (isGuest ? "I" : "U")
-                  )[0].toUpperCase()}
-                </div>
-              )}
-              <div className="user-info-text">
-                <strong>
-                  {currentUser
-                    ? currentUser.displayName || currentUser.email
-                    : "Invitado (Modo Local)"}
-                </strong>
-                <span>
-                  {currentUser
-                    ? currentUser.email
-                    : "Datos guardados solo en este equipo"}
+              <div>
+                <h3>{profile?.name}</h3>
+                <span className="field-help">
+                  {profile?.googleEmail || "Solo en este dispositivo"}
                 </span>
               </div>
+              <span className="local-status">
+                <Smartphone size={14} /> Local
+              </span>
             </div>
-
-            {currentUser ? (
+            <p>
+              Esta cartera, sus movimientos y sus ajustes pertenecen únicamente
+              a este perfil.
+            </p>
+            {profile?.id === "legacy" && (
+              <p className="inline-notice">
+                Conservamos tus datos anteriores aquí. Revísalos antes de
+                conectar Google: la versión anterior compartía la base local
+                entre accesos.
+              </p>
+            )}
+            <div className="profile-cloud-state">
+              <Cloud size={18} />
+              <span>
+                {canSync
+                  ? "Respaldo de este perfil activado"
+                  : profile?.googleUid
+                    ? "Respaldo pausado"
+                    : "Google es opcional"}
+              </span>
+            </div>
+            <p className="field-help">
+              {profile?.googleUid
+                ? "Usa la cuenta vinculada para continuar el respaldo. Desconectar conserva tus datos locales."
+                : "Al conectar Google, autorizas guardar una copia de este perfil en la nube. Los demás perfiles se quedan como están."}
+            </p>
+            {canSync ? (
               <button
-                type="button"
                 className="secondary full"
-                style={{
-                  marginTop: "12px",
-                  color: "#ef4444",
-                  borderColor: "rgba(239, 68, 68, 0.3)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "8px",
-                }}
-                disabled={busy}
-                onClick={handleLogout}
+                disabled={busy || syncStatus === "syncing"}
+                onClick={() => void handleLogout()}
               >
-                <LogOut size={16} /> Cerrar sesión
+                <LogOut size={16} /> Desconectar Google
               </button>
             ) : (
-              <div style={{ marginTop: "12px" }}>
-                <button
-                  type="button"
-                  className="google-login-btn full"
-                  disabled={busy || !online}
-                  onClick={() => {
-                    setBusy(true);
-                    void run(
-                      async () => {
-                        const user = await loginWithGoogle();
-                        setCurrentUser(user);
-                        setIsGuest(false);
-                        localStorage.setItem("clara_guest_mode", "false");
-                      },
-                      "Sesión iniciada con Google",
-                    ).finally(() => setBusy(false));
-                  }}
-                  style={{ width: "100%", justifyContent: "center" }}
-                >
-                  <svg className="google-icon-svg" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    />
-                  </svg>
-                  Vincular con cuenta de Google
-                </button>
-                <button
-                  type="button"
-                  className="text-button"
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "center",
-                    marginTop: "10px",
-                    color: "var(--muted, #94a3b8)",
-                    fontSize: "13px",
-                  }}
-                  onClick={handleLogout}
-                >
-                  <LogOut size={14} style={{ verticalAlign: "middle", marginRight: 4 }} />
-                  Salir al inicio de sesión
-                </button>
-              </div>
+              <button
+                className="google-login-btn"
+                disabled={busy || !online}
+                onClick={() => void handleConnect()}
+              >
+                <GoogleMark />
+                {busy
+                  ? "Conectando…"
+                  : profile?.googleUid
+                    ? "Reconectar mi cuenta Google"
+                    : "Conectar este perfil a Google"}
+              </button>
             )}
-          </div>
-
-          <hr />
-
+            <button
+              className="text-button switch-profile"
+              disabled={busy || syncStatus === "syncing"}
+              onClick={chooseProfile}
+            >
+              Cambiar o crear perfil <ArrowRight size={16} />
+            </button>
+          </section>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -2074,9 +1440,6 @@ export default function App() {
                 () =>
                   savePrefs({
                     budget: Number(f.get("budget")),
-                    syncUrl: prefs.syncUrl || "",
-                    syncToken: prefs.syncToken || "",
-                    firebaseConfig: prefs.firebaseConfig || "",
                   }),
                 "Configuración guardada",
               );
@@ -2103,268 +1466,37 @@ export default function App() {
               <Check size={16} /> Guardar configuración
             </button>
           </form>
-          <hr />
-          <div style={{ margin: "16px 0" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-              <h3 style={{ margin: 0, fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                <Cloud size={16} style={{ color: "var(--accent, #38bdf8)" }} />
-                Sincronización en la Nube
-              </h3>
-              <span
-                style={{
-                  fontSize: "11px",
-                  color: currentUser ? "#4ade80" : "var(--muted, #94a3b8)",
-                  background: currentUser ? "rgba(74, 222, 128, 0.1)" : "rgba(255, 255, 255, 0.06)",
-                  padding: "2px 8px",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
-                }}
-              >
-                {currentUser ? "Automática activa" : "Modo local"}
-              </span>
-            </div>
-            <p className="field-help" style={{ marginTop: 0, marginBottom: "10px" }}>
-              Clara sincroniza automáticamente tus movimientos en segundo plano. Usa este botón para forzar la sincronización manual de inmediato con los servidores de Google Firebase.
+          <button
+            className="secondary full"
+            disabled={busy || !online || !canSync || syncStatus === "syncing"}
+            onClick={() => void syncNow(true)}
+          >
+            <RefreshCw
+              size={16}
+              className={syncStatus === "syncing" ? "spin" : ""}
+            />
+            {syncStatus === "syncing"
+              ? "Sincronizando…"
+              : "Sincronizar este perfil"}
+          </button>
+          {syncStatus === "error" && (
+            <p className="inline-notice" role="status">
+              Tus cambios están guardados en este perfil. No se pudo actualizar
+              Google; vuelve a intentarlo.
             </p>
-            <button
-              className="secondary full"
-              disabled={busy || !online}
-              onClick={() => {
-                setBusy(true);
-                void run(async () => {
-                  const count = await syncData(prefs);
-                  notify(
-                    typeof count === "number" && count > 0
-                      ? `Sincronizados ${count} registros con Firebase`
-                      : "Sincronización completada: tus datos están al día en la nube.",
-                  );
-                }).finally(() => setBusy(false));
-              }}
-            >
-              <RefreshCw size={16} className={busy ? "spin" : ""} />
-              {busy ? "Sincronizando…" : "Sincronizar ahora con la nube"}
-            </button>
-            {prefs.lastSync && (
-              <p className="field-help" style={{ marginTop: "6px" }}>
-                Última sincronización:{" "}
-                {new Date(prefs.lastSync).toLocaleString("es-MX")}
-              </p>
-            )}
-          </div>
-          <hr />
-          <div style={{ margin: "16px 0" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-              <h3 style={{ margin: 0, fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-                <Sparkles size={16} style={{ color: "var(--accent, #38bdf8)" }} />
-                Versión y Actualizaciones
-              </h3>
-              <span
-                style={{
-                  fontSize: "11px",
-                  color: "var(--muted, #94a3b8)",
-                  background: "rgba(255, 255, 255, 0.06)",
-                  padding: "2px 8px",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
-                }}
-              >
-                v1.1.0 · Web
-              </span>
-            </div>
-            <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
-              Comprueba si hay una nueva versión o correcciones en la nube y actualiza al instante.
+          )}
+          {prefs.lastSync && (
+            <p className="field-help">
+              Última sincronización:{" "}
+              {new Date(prefs.lastSync).toLocaleString("es-MX")}
             </p>
-            <button
-              type="button"
-              className="secondary full"
-              disabled={checkingUpdate || !online}
-              onClick={handleCheckUpdate}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-              }}
-            >
-              <RefreshCw size={16} className={checkingUpdate ? "spin" : ""} />
-              {checkingUpdate ? "Buscando actualizaciones…" : "Buscar actualizaciones"}
-            </button>
-          </div>
-          <hr />
-          <div style={{ margin: "16px 0" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "6px",
-              }}
-            >
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: "16px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <Bell size={16} style={{ color: "var(--accent, #38bdf8)" }} />
-                Notificaciones del Dispositivo
-              </h3>
-              <span
-                style={{
-                  fontSize: "11px",
-                  fontWeight: 600,
-                  color:
-                    notificationPermission === "granted"
-                      ? "#4ade80"
-                      : notificationPermission === "denied"
-                        ? "#f87171"
-                        : "#fbbf24",
-                  background:
-                    notificationPermission === "granted"
-                      ? "rgba(74, 222, 128, 0.12)"
-                      : notificationPermission === "denied"
-                        ? "rgba(248, 113, 113, 0.12)"
-                        : "rgba(251, 191, 36, 0.12)",
-                  padding: "3px 10px",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                }}
-              >
-                {notificationPermission === "granted"
-                  ? "✓ Activas en sistema"
-                  : notificationPermission === "denied"
-                    ? "✕ Bloqueadas"
-                    : "Pendiente de permiso"}
-              </span>
-            </div>
-            <p
-              className="field-help"
-              style={{ marginTop: 0, marginBottom: "10px" }}
-            >
-              Recibe avisos en la barra de notificaciones de tu teléfono o
-              pantalla de bloqueo, con vibración háptica y banner flotante estilo
-              iOS.
-            </p>
-
-            {isIosDevice() && !isStandalonePwa() && (
-              <div
-                style={{
-                  background: "rgba(56, 189, 248, 0.08)",
-                  border: "1px solid rgba(56, 189, 248, 0.22)",
-                  borderRadius: "12px",
-                  padding: "10px 12px",
-                  marginBottom: "12px",
-                  fontSize: "12px",
-                  lineHeight: "1.4",
-                  color: "#93c5fd",
-                }}
-              >
-                <strong>📱 Para iPhone / iPad:</strong> Para recibir
-                notificaciones del sistema en pantalla de bloqueo, añade Clara
-                a tu inicio (pulsa <em>Compartir</em> en Safari y elige{" "}
-                <em>“Añadir a pantalla de inicio”</em>).
-              </div>
-            )}
-
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
-            >
-              {notificationPermission !== "granted" && (
-                <button
-                  type="button"
-                  className="primary full"
-                  style={{
-                    fontSize: "13px",
-                    padding: "10px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "8px",
-                  }}
-                  onClick={async () => {
-                    const res = await requestDeviceNotificationPermission();
-                    setNotificationPermission(res);
-                    if (res === "granted") {
-                      notify(
-                        "¡Notificaciones activadas en tu dispositivo! Te avisaremos de pagos y movimientos.",
-                        "CLARA · NOTIFICACIONES",
-                        "success",
-                      );
-                    } else if (res === "denied") {
-                      notify(
-                        "Permiso denegado. Puedes habilitarlo en los ajustes del navegador de tu teléfono.",
-                        "PERMISO REQUERIDO",
-                        "warning",
-                      );
-                    }
-                  }}
-                >
-                  <Bell size={15} /> Activar notificaciones en mi dispositivo
-                </button>
-              )}
-
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  type="button"
-                  className="secondary"
-                  style={{
-                    flex: 1,
-                    fontSize: "13px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "6px",
-                  }}
-                  onClick={() => {
-                    notify(
-                      "📅 Recordatorio: Pago de Internet Telmex ($550.00 MXN) vence en 2 días.",
-                      "RECORDATORIO DE PAGO",
-                      "payment",
-                    );
-                  }}
-                >
-                  <Sparkles size={14} /> Probar aviso
-                </button>
-
-                <button
-                  type="button"
-                  className="secondary"
-                  style={{
-                    flex: 1,
-                    fontSize: "13px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "6px",
-                  }}
-                  onClick={() => {
-                    if (fixed.length === 0) {
-                      notify(
-                        "No tienes pagos fijos registrados este mes. Puedes agregar uno en la pestaña 'Fijos'.",
-                        "PAGOS DEL MES",
-                        "info",
-                      );
-                    } else {
-                      notify(
-                        `Tienes ${fixed.length} ${fixed.length === 1 ? "compromiso" : "compromisos"} que suman ${money(s.fixed)} MXN este mes.`,
-                        "COMPROMISOS FIJOS",
-                        "payment",
-                      );
-                    }
-                  }}
-                >
-                  <CalendarDays size={14} /> Avisar pagos
-                </button>
-              </div>
-            </div>
-          </div>
+          )}
           <hr />
           <div style={{ margin: "16px 0" }}>
             <div className="section-row" style={{ marginBottom: "8px" }}>
-              <h3 style={{ margin: 0, fontSize: "16px" }}>Categorías de Gastos</h3>
+              <h3 style={{ margin: 0, fontSize: "16px" }}>
+                Categorías de Gastos
+              </h3>
               <button
                 type="button"
                 className="text-button"
@@ -2379,8 +1511,12 @@ export default function App() {
                 Restablecer
               </button>
             </div>
-            <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
-              Agrega o elimina categorías para personalizar tu registro de gastos.
+            <p
+              className="field-help"
+              style={{ marginTop: 0, marginBottom: "12px" }}
+            >
+              Agrega o elimina categorías para personalizar tu registro de
+              gastos.
             </p>
 
             <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
@@ -2455,6 +1591,32 @@ export default function App() {
               ))}
             </div>
           </div>
+          <hr />
+          <section className="settings-section">
+            <h3>Versión y actualizaciones</h3>
+            <p className="field-help">
+              Las mejoras se descargan en segundo plano. Tú eliges cuándo
+              aplicarlas.
+            </p>
+            <button
+              className="secondary full"
+              disabled={checkingUpdate || !online}
+              onClick={() => void handleCheckUpdate()}
+            >
+              <RefreshCw size={16} className={checkingUpdate ? "spin" : ""} />
+              {checkingUpdate ? "Buscando…" : "Buscar actualizaciones"}
+            </button>
+          </section>
+          <hr />
+          <NotificationSettings
+            prefs={prefs}
+            savePrefs={savePrefs}
+            notify={notify}
+            profileName={profile?.name || "Mi perfil"}
+            profileId={profile?.id || ""}
+            fixedTotal={s.fixed}
+            fixedCount={fixed.length}
+          />
           <hr />
           <h3>Respaldo y portabilidad</h3>
           <p className="field-help">
@@ -2533,11 +1695,25 @@ export default function App() {
           )}
           <hr />
           <div style={{ margin: "16px 0" }}>
-            <h3 style={{ color: "#ef4444", display: "flex", alignItems: "center", gap: "8px", margin: "0 0 6px 0", fontSize: "16px" }}>
-              <Trash2 size={18} /> Restablecer desde cero
+            <h3
+              style={{
+                color: "#ef4444",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                margin: "0 0 6px 0",
+                fontSize: "16px",
+              }}
+            >
+              <Trash2 size={18} /> Vaciar este perfil
             </h3>
-            <p className="field-help" style={{ marginTop: 0, marginBottom: "12px" }}>
-              Elimina de forma definitiva todos los movimientos, gastos fijos, cuentas y deudas de este dispositivo y de la nube de Google para dejar tu cuenta totalmente en $0.00.
+            <p
+              className="field-help"
+              style={{ marginTop: 0, marginBottom: "12px" }}
+            >
+              Vacía únicamente este perfil. Si conectas Google, la eliminación
+              se sincronizará con su respaldo. Descarga una copia antes de
+              continuar.
             </p>
             <button
               type="button"
@@ -2559,9 +1735,10 @@ export default function App() {
               disabled={busy}
               onClick={handleWipeAllData}
             >
-              <Trash2 size={16} /> {busy ? "Borrando registros…" : "Restablecer y borrar datos de la cuenta"}
+              <Trash2 size={16} /> Vaciar este perfil
             </button>
           </div>
+          <Credits />
         </Modal>
       )}
     </div>
@@ -2613,7 +1790,11 @@ function EntryForm({
         if (kind === "transaction") {
           title = category || (direction === "income" ? "Ingreso" : "Gasto");
         } else {
-          throw new Error(kind === "account" ? "Escribe un nombre de cuenta." : "Escribe un concepto.");
+          throw new Error(
+            kind === "account"
+              ? "Escribe un nombre de cuenta."
+              : "Escribe un concepto.",
+          );
         }
       }
       if (

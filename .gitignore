@@ -6,3 +6,4 @@ server/data/
 playwright-report/
 test-results/
 .firebase/
+*-debug.log

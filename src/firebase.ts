@@ -1,24 +1,32 @@
-import { initializeApp, getApps, type FirebaseApp, type FirebaseOptions } from "firebase/app";
+import {
+  initializeApp,
+  getApps,
+  type FirebaseApp,
+  type FirebaseOptions,
+} from "firebase/app";
 import {
   getFirestore,
   collection,
   doc,
   getDocs,
-  getDoc,
-  setDoc,
-  deleteDoc,
-  writeBatch,
-  onSnapshot,
-  type Firestore,
-  type Unsubscribe,
+  getDocsFromServer,
+  getDocFromServer,
+  query,
+  limit,
+  runTransaction,
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { db, type Entry, type Prefs } from "./data";
-
+import {
+  db,
+  defaults,
+  validEntries,
+  isSyncBlocked,
+  getSyncGeneration,
+  type Entry,
+  type Prefs,
+} from "./data";
+import { activeProfile, cloudScope, registry, type Profile } from "./profiles";
 let firebaseApp: FirebaseApp | null = null;
-let firestoreDb: Firestore | null = null;
-let unsubscribeSnapshot: Unsubscribe | null = null;
-
 const DEFAULT_FIREBASE_CONFIG: FirebaseOptions = {
   apiKey: "AIzaSyAPNCEM2U0FzP_L4jl1x5EdbJAJvi4oPVE",
   authDomain: "mis-finanzas-af0aa.firebaseapp.com",
@@ -28,30 +36,6 @@ const DEFAULT_FIREBASE_CONFIG: FirebaseOptions = {
   appId: "1:44820766100:web:6ef7836f766b2f78518381",
   measurementId: "G-459TG230FE",
 };
-
-export function resolveSyncKey(prefs?: Prefs, targetUid?: string | null): string | null {
-  if (targetUid && targetUid.trim() && targetUid !== "guest") {
-    return targetUid.trim();
-  }
-
-  const app = getFirebaseApp(prefs ? getStoredFirebaseConfig(prefs) : null);
-  if (app) {
-    try {
-      const user = getAuth(app).currentUser;
-      if (user?.uid) return user.uid;
-    } catch {}
-  }
-
-  if (typeof localStorage !== "undefined") {
-    const stored = localStorage.getItem("clara_current_uid");
-    if (stored && stored !== "guest" && stored !== "null") {
-      return stored;
-    }
-  }
-
-  if (prefs?.syncToken?.trim()) return prefs.syncToken.trim();
-  return null;
-}
 
 function getEnvConfig(): FirebaseOptions | null {
   if (import.meta.env.VITE_FIREBASE_CONFIG) {
@@ -68,10 +52,15 @@ function getEnvConfig(): FirebaseOptions | null {
   if (apiKey && projectId) {
     return {
       apiKey,
-      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`,
+      authDomain:
+        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ||
+        `${projectId}.firebaseapp.com`,
       projectId,
-      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || `${projectId}.appspot.com`,
-      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+      storageBucket:
+        import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
+        `${projectId}.appspot.com`,
+      messagingSenderId:
+        import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
       appId: import.meta.env.VITE_FIREBASE_APP_ID || "",
     };
   }
@@ -79,260 +68,246 @@ function getEnvConfig(): FirebaseOptions | null {
   return null;
 }
 
-export function getStoredFirebaseConfig(prefs?: Prefs): FirebaseOptions {
-  if (prefs?.firebaseConfig) {
-    try {
-      return typeof prefs.firebaseConfig === "string"
-        ? JSON.parse(prefs.firebaseConfig)
-        : (prefs.firebaseConfig as FirebaseOptions);
-    } catch {
-      // Formato inválido
-    }
-  }
-
-  const local = localStorage.getItem("clara_firebase_config");
-  if (local) {
-    try {
-      return JSON.parse(local);
-    } catch {
-      // Formato inválido
-    }
-  }
-
-  return getEnvConfig() || DEFAULT_FIREBASE_CONFIG;
+export function getFirebaseApp(): FirebaseApp {
+  if (!firebaseApp)
+    firebaseApp =
+      getApps()[0] || initializeApp(getEnvConfig() || DEFAULT_FIREBASE_CONFIG);
+  return firebaseApp;
 }
+export const initFirebase = () => getFirestore(getFirebaseApp());
+const clean = (value: Entry) =>
+  Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
 
-export function getFirebaseApp(config?: FirebaseOptions | null): FirebaseApp | null {
-  if (firebaseApp) return firebaseApp;
-  const resolvedConfig = config || getStoredFirebaseConfig();
-  if (!resolvedConfig || !resolvedConfig.apiKey || !resolvedConfig.projectId) {
-    return null;
-  }
-  try {
-    if (!getApps().length) {
-      firebaseApp = initializeApp(resolvedConfig);
-    } else {
-      firebaseApp = getApps()[0];
-    }
-    return firebaseApp;
-  } catch (error) {
-    console.error("Error al inicializar Firebase App:", error);
-    return null;
-  }
+async function requireScope() {
+  if (isSyncBlocked())
+    throw new Error("Sincronización pausada mientras se vacía el perfil.");
+  const profile = await activeProfile();
+  const scope = cloudScope(profile, getAuth(getFirebaseApp()).currentUser?.uid);
+  if (!scope || !profile)
+    throw new Error(
+      "Conecta la cuenta Google vinculada a este perfil para sincronizar.",
+    );
+  return { ...scope, profile };
 }
-
-export function initFirebase(config?: FirebaseOptions | null): Firestore | null {
-  const app = getFirebaseApp(config);
-  if (!app) return null;
-
-  try {
-    if (!firestoreDb) {
-      firestoreDb = getFirestore(app);
-    }
-    return firestoreDb;
-  } catch (error) {
-    console.error("Error al inicializar Firebase Firestore:", error);
-    return null;
-  }
-}
-
-export function isFirebaseConfigured(prefs?: Prefs): boolean {
-  return !!getStoredFirebaseConfig(prefs);
-}
-
-export async function syncWithFirestore(prefs?: Prefs): Promise<number> {
-  const syncKey = resolveSyncKey(prefs);
-  if (!syncKey) {
-    // No user authenticated or valid sync token; do not sync
-    return 0;
-  }
-
-  const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
-  if (!firestore) {
-    throw new Error("Google Firebase no está configurado todavía.");
-  }
-
-  const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
-
-  // Sync user preferences (budget, categories) with user document in Firestore
-  try {
-    const userDocRef = doc(firestore, "clara_users", syncKey);
-    const userDocSnap = await getDoc(userDocRef);
-    if (userDocSnap.exists()) {
-      const cloudData = userDocSnap.data();
-      if (cloudData) {
-        const updatePayload: Partial<Prefs> = {};
-        if (typeof cloudData.budget === "number") updatePayload.budget = cloudData.budget;
-        if (Array.isArray(cloudData.customCategories)) updatePayload.customCategories = cloudData.customCategories;
-        if (Object.keys(updatePayload).length > 0) {
-          await db.prefs.update("main", updatePayload);
-        }
-      }
-    } else if (prefs) {
-      await setDoc(userDocRef, {
-        budget: prefs.budget || 0,
-        customCategories: prefs.customCategories || [],
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-    }
-  } catch (err) {
-    console.warn("No se pudieron sincronizar las preferencias de usuario:", err);
-  }
-
-  const remoteSnapshot = await getDocs(entriesCol);
-  const remoteEntries = new Map<string, Entry>();
-  remoteSnapshot.forEach((docSnap) => {
-    const data = docSnap.data() as Entry;
-    if (data && data.id) {
-      remoteEntries.set(data.id, data);
-    }
-  });
-
+export async function syncWithFirestore(_prefs?: Prefs): Promise<number> {
+  const generation = getSyncGeneration();
+  const startedAt = new Date().toISOString();
+  const { uid, profileId, profile } = await requireScope();
+  const firestore = initFirebase();
+  const root = doc(firestore, "clara_users", uid, "profiles", profileId);
+  const entriesCol = collection(root, "entries");
+  const assertCurrent = async () => {
+    if (generation !== getSyncGeneration())
+      throw new Error("La operación anterior se canceló al vaciar el perfil.");
+    const scope = await requireScope();
+    if (scope.uid !== uid || scope.profileId !== profileId)
+      throw new Error("La sincronización se pausó.");
+  };
+  // Server reads and transactions fail offline: never label cached data as synced.
+  const remoteSnapshot = await getDocsFromServer(entriesCol);
+  await assertCurrent();
   const localEntries = await db.entries.toArray();
-  const localMap = new Map<string, Entry>();
-  for (const entry of localEntries) {
-    localMap.set(entry.id, entry);
-  }
-
-  const toUpload: Entry[] = [];
-  const toDownload: Entry[] = [];
-
-  for (const local of localEntries) {
-    const remote = remoteEntries.get(local.id);
-    if (!remote || local.updated > remote.updated) {
-      toUpload.push(local);
-    }
-  }
-
-  for (const [id, remote] of remoteEntries.entries()) {
-    const local = localMap.get(id);
-    if (!local || remote.updated > local.updated) {
-      toDownload.push(remote);
-    }
-  }
-
-  if (toUpload.length > 0) {
-    const batchSize = 400;
-    for (let i = 0; i < toUpload.length; i += batchSize) {
-      const chunk = toUpload.slice(i, i + batchSize);
-      const batch = writeBatch(firestore);
-      for (const item of chunk) {
-        const itemRef = doc(entriesCol, item.id);
-        const cleanItem: Record<string, any> = {};
-        for (const [key, value] of Object.entries(item)) {
-          if (value !== undefined) cleanItem[key] = value;
-        }
-        batch.set(itemRef, cleanItem, { merge: true });
+  const localMap = new Map(localEntries.map((e) => [e.id, e]));
+  const ids = [
+    ...new Set([...localMap.keys(), ...remoteSnapshot.docs.map((d) => d.id)]),
+  ];
+  let changes = 0;
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    await assertCurrent();
+    const chunk = ids.slice(offset, offset + 100);
+    const result = await runTransaction(firestore, async (transaction) => {
+      await assertCurrent();
+      const snapshots = await Promise.all(
+        chunk.map((id) => transaction.get(doc(entriesCol, id))),
+      );
+      const downloads: Entry[] = [];
+      let uploads = 0;
+      for (const snapshot of snapshots) {
+        const local = localMap.get(snapshot.id);
+        const remote = snapshot.exists()
+          ? (snapshot.data() as Entry)
+          : undefined;
+        if (remote && (!validEntries([remote]) || remote.id !== snapshot.id))
+          throw new Error(
+            "Hay un registro no válido en la nube. Tus datos locales están intactos.",
+          );
+        if (local && (!remote || local.updated > remote.updated)) {
+          transaction.set(snapshot.ref, clean(local));
+          uploads++;
+        } else if (remote && (!local || remote.updated > local.updated))
+          downloads.push(remote);
       }
-      await batch.commit();
-    }
-  }
-
-  if (toDownload.length > 0) {
+      return { downloads, uploads };
+    });
+    await assertCurrent();
     await db.transaction("rw", db.entries, async () => {
-      for (const entry of toDownload) {
-        await db.entries.put(entry);
+      for (const entry of result.downloads) {
+        const current = await db.entries.get(entry.id);
+        if (!current || entry.updated > current.updated)
+          await db.entries.put(entry);
       }
     });
+    changes += result.downloads.length + result.uploads;
   }
-
-  await db.prefs.update("main", { lastSync: new Date().toISOString() });
-  return toUpload.length + toDownload.length;
-}
-
-export function setupFirestoreRealtime(prefs?: Prefs, onUpdated?: () => void): () => void {
-  if (unsubscribeSnapshot) {
-    unsubscribeSnapshot();
-    unsubscribeSnapshot = null;
-  }
-
-  const syncKey = resolveSyncKey(prefs);
-  if (!syncKey) return () => {};
-
-  const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
-  if (!firestore) return () => {};
-
-  const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
-
-  unsubscribeSnapshot = onSnapshot(entriesCol, async (snapshot) => {
-    let hasChanges = false;
-    for (const change of snapshot.docChanges()) {
-      if (change.type === "added" || change.type === "modified") {
-        const remote = change.doc.data() as Entry;
-        if (!remote || !remote.id) continue;
-        const local = await db.entries.get(remote.id);
-        if (!local || remote.updated > local.updated) {
-          await db.entries.put(remote);
-          hasChanges = true;
-        }
-      }
+  await assertCurrent();
+  const localPrefs = (await db.prefs.get("main")) || defaults;
+  const prefsRef = doc(root, "preferences", "main");
+  const remotePrefs = await runTransaction(firestore, async (transaction) => {
+    await assertCurrent();
+    const [meta, snapshot] = await Promise.all([
+      transaction.get(root),
+      transaction.get(prefsRef),
+    ]);
+    const remote = snapshot.exists() ? snapshot.data() : undefined;
+    if (remote && !validCloudPreferences(remote))
+      throw new Error("Las preferencias de la nube no son válidas.");
+    if (!meta.exists())
+      transaction.set(root, { name: profile.name, created: profile.created });
+    if (!remote || (localPrefs.prefsUpdated || 0) > remote.updated) {
+      transaction.set(prefsRef, {
+        budget: localPrefs.budget,
+        customCategories:
+          localPrefs.customCategories || defaults.customCategories,
+        updated: localPrefs.prefsUpdated || 0,
+      });
+      return undefined;
     }
-    if (hasChanges && onUpdated) {
-      onUpdated();
-    }
-  }, (err) => {
-    console.warn("Firestore snapshot listener error:", err);
+    return remote;
   });
-
-  return () => {
-    if (unsubscribeSnapshot) {
-      unsubscribeSnapshot();
-      unsubscribeSnapshot = null;
+  await assertCurrent();
+  await db.transaction("rw", db.prefs, async () => {
+    const current = (await db.prefs.get("main")) || defaults;
+    if (remotePrefs && remotePrefs.updated > (current.prefsUpdated || 0)) {
+      await db.prefs.put({
+        ...current,
+        budget: remotePrefs.budget,
+        customCategories: remotePrefs.customCategories,
+        prefsUpdated: remotePrefs.updated,
+      });
     }
+    await db.prefs.update("main", { lastSync: startedAt });
+  });
+  return changes;
+}
+export function validCloudPreferences(
+  value: any,
+): value is { budget: number; customCategories: string[]; updated: number } {
+  return (
+    value &&
+    Number.isFinite(value.budget) &&
+    value.budget >= 0 &&
+    value.budget <= 1e12 &&
+    Number.isFinite(value.updated) &&
+    value.updated >= 0 &&
+    Array.isArray(value.customCategories) &&
+    value.customCategories.length <= 100 &&
+    value.customCategories.every(
+      (c: unknown) => typeof c === "string" && c.length > 0 && c.length <= 80,
+    )
+  );
+}
+export interface CloudProfile {
+  id: string;
+  uid: string;
+  name: string;
+  created: number;
+  legacy?: boolean;
+}
+export async function listCloudProfiles(): Promise<CloudProfile[]> {
+  const uid = getAuth(getFirebaseApp()).currentUser?.uid;
+  if (!uid) throw new Error("Inicia sesión con Google.");
+  const firestore = initFirebase();
+  const snapshots = await getDocsFromServer(
+    collection(firestore, "clara_users", uid, "profiles"),
+  );
+  const profiles = snapshots.docs
+    .filter((d) => typeof d.data().name === "string")
+    .map((d) => ({
+      id: d.id,
+      name: d.data().name as string,
+      created: Number(d.data().created) || Date.now(),
+    }));
+  const legacy = await getDocsFromServer(
+    query(collection(firestore, "clara_users", uid, "entries"), limit(1)),
+  );
+  const legacyPrefs = await getDocFromServer(
+    doc(firestore, "clara_users", uid),
+  );
+  const recoveredLegacy = profiles.some((p) => p.id === "legacy-google");
+  if ((!legacy.empty || legacyPrefs.exists()) && !recoveredLegacy)
+    profiles.push({
+      id: "legacy-google",
+      name: "Datos anteriores de Google",
+      created: 0,
+    });
+  if (getAuth(getFirebaseApp()).currentUser?.uid !== uid)
+    throw new Error("La cuenta cambió. Vuelve a recuperar tus perfiles.");
+  return profiles.map((p) => ({
+    ...p,
+    uid,
+    legacy: p.id === "legacy-google" && !recoveredLegacy,
+  }));
+}
+export async function recoverCloudProfile(
+  cloud: CloudProfile,
+): Promise<Profile> {
+  const user = getAuth(getFirebaseApp()).currentUser;
+  if (!user) throw new Error("Inicia sesión con Google.");
+  if (user.uid !== cloud.uid)
+    throw new Error("La cuenta cambió. Vuelve a recuperar tus perfiles.");
+  const existing = await registry.profiles
+    .where("googleUid")
+    .equals(user.uid)
+    .filter((p) => p.cloudId === cloud.id)
+    .first();
+  if (existing) {
+    await registry.profiles.update(existing.id, { cloudEnabled: true });
+    return existing;
+  }
+  const profile: Profile = {
+    id: crypto.randomUUID(),
+    name: cloud.name.slice(0, 40),
+    created: cloud.created || Date.now(),
+    googleUid: user.uid,
+    googleEmail: user.email || "Cuenta Google",
+    cloudId: cloud.id,
+    cloudEnabled: true,
   };
-}
-
-export function stopFirestoreRealtime(): void {
-  if (unsubscribeSnapshot) {
-    unsubscribeSnapshot();
-    unsubscribeSnapshot = null;
-  }
-}
-
-export async function clearCloudEntries(
-  targetUidOrPrefs?: string | null | Prefs,
-  optionalPrefs?: Prefs,
-): Promise<number> {
-  const targetUid = typeof targetUidOrPrefs === "string" ? targetUidOrPrefs : null;
-  const prefs = typeof targetUidOrPrefs === "object" && targetUidOrPrefs !== null ? targetUidOrPrefs : optionalPrefs;
-
-  const syncKey = resolveSyncKey(prefs, targetUid);
-  if (!syncKey) {
-    console.warn("clearCloudEntries: No se encontró identificador de usuario para borrar.");
-    return 0;
-  }
-
-  const firestore = firestoreDb || initFirebase(getStoredFirebaseConfig(prefs));
-  if (!firestore) {
-    throw new Error("No se pudo conectar a Firebase Firestore.");
-  }
-
-  if (unsubscribeSnapshot) {
-    unsubscribeSnapshot();
-    unsubscribeSnapshot = null;
-  }
-
-  const entriesCol = collection(firestore, "clara_users", syncKey, "entries");
-  const snapshot = await getDocs(entriesCol);
-  const docs = snapshot.docs;
-  if (!snapshot.empty) {
-    const batchSize = 400;
-    for (let i = 0; i < docs.length; i += batchSize) {
-      const chunk = docs.slice(i, i + batchSize);
-      const batch = writeBatch(firestore);
-      for (const d of chunk) {
-        batch.delete(d.ref);
-      }
-      await batch.commit();
+  if (cloud.legacy) {
+    // Explicit recovery into a NEW database. Never merge unknown old local data.
+    const snapshot = await getDocsFromServer(
+      collection(initFirebase(), "clara_users", user.uid, "entries"),
+    );
+    const entries = snapshot.docs.map((d) => d.data());
+    const legacyPrefs = await getDocFromServer(
+      doc(initFirebase(), "clara_users", user.uid),
+    );
+    if (!validEntries(entries))
+      throw new Error("El respaldo anterior contiene datos no válidos.");
+    if (getAuth(getFirebaseApp()).currentUser?.uid !== user.uid)
+      throw new Error("La cuenta cambió. Vuelve a intentarlo.");
+    const { Database } = await import("./data");
+    const target = new Database(profile.id);
+    try {
+      await target.entries.bulkPut(entries);
+      const previous = legacyPrefs.data();
+      const prefs = {
+        budget: previous?.budget ?? 0,
+        customCategories:
+          previous?.customCategories || defaults.customCategories,
+        updated: Date.now(),
+      };
+      if (validCloudPreferences(prefs))
+        await target.prefs.put({
+          ...defaults,
+          budget: prefs.budget,
+          customCategories: prefs.customCategories,
+          prefsUpdated: prefs.updated,
+        });
+    } finally {
+      target.close();
     }
   }
-
-  // Delete user prefs doc as well
-  try {
-    await deleteDoc(doc(firestore, "clara_users", syncKey));
-  } catch (e) {
-    console.warn("No se pudo borrar documento principal de usuario:", e);
-  }
-
-  return docs.length;
+  await registry.profiles.add(profile);
+  return profile;
 }
