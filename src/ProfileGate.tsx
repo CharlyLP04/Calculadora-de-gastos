@@ -248,14 +248,12 @@ export function Credits() {
       <span>
         Desarrollado por <strong>charly_dev</strong>
       </span>
-      <div className="maker-frame" title="Grid.mx · Pensamos en código. Creamos soluciones.">
-        <img
-          src={`${import.meta.env.BASE_URL}grid-mx.png`}
-          alt="Grid.mx · Pensamos en código. Creamos soluciones."
-          width="892"
-          height="357"
-        />
-      </div>
+      <img
+        src={`${import.meta.env.BASE_URL}grid-mx.png`}
+        alt="Grid.mx · Pensamos en código. Creamos soluciones."
+        width="900"
+        height="409"
+      />
     </footer>
   );
 }

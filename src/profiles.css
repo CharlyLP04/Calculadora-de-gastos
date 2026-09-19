@@ -454,29 +454,19 @@ dialog .ios-banner.is-dismissing {
   font-weight: 500;
   font-size: 12px;
 }
-.maker-frame {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 14px;
-  background: rgba(10, 18, 28, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  transition: all 0.2s ease;
-}
-.maker-frame:hover {
-  background: rgba(15, 26, 40, 0.9);
-  border-color: rgba(255, 255, 255, 0.22);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-.maker-frame img {
-  width: 96px;
+.maker-credit img {
+  width: 108px;
   height: auto;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
   display: block;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.maker-credit img:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.24);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.6);
 }
 .sidebar-profile {
   display: flex;

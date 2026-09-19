@@ -35,14 +35,14 @@ export function NotificationSettings({
     try {
       if (active) {
         await savePrefs({ notificationsEnabled: false });
-        notify("Avisos del dispositivo pausados.");
+        notify("Avisos del sistema desactivados.");
         return;
       }
       const result = await requestDeviceNotificationPermission();
       setPermission(result);
       if (result === "granted") {
         await savePrefs({ notificationsEnabled: true });
-        notify("¡Avisos activados en tu dispositivo!");
+        notify("¡Avisos del sistema activados!");
         await showDeviceNotification(
           `Clara · ${profileName}`,
           "¡Avisos activados en tu dispositivo! Te recordaremos tus próximos pagos y compromisos.",
@@ -120,8 +120,8 @@ export function NotificationSettings({
         >
           {active ? <BellOff size={16} /> : <Bell size={16} />}
           {active
-            ? "Pausar avisos de este perfil"
-            : "Activar avisos en este dispositivo"}
+            ? "Desactivar avisos del sistema"
+            : "Activar avisos del sistema"}
         </button>
         <button
           className="secondary full"
