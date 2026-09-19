@@ -510,6 +510,7 @@ export function ProfileGate({ children }: { children: ReactNode }) {
               {profiles?.map((p) => (
                 <div className="profile-item-card" key={p.id}>
                   <button
+                    type="button"
                     className="profile-choice"
                     disabled={busy}
                     onClick={() => void run(() => openProfile(p.id))}
@@ -518,8 +519,8 @@ export function ProfileGate({ children }: { children: ReactNode }) {
                       {p.name[0]?.toLocaleUpperCase() || "C"}
                     </span>
                     <span className="profile-meta-block">
-                      <strong>{p.name}</strong>
-                      <small>
+                      <strong title={p.name}>{p.name}</strong>
+                      <small title={p.googleEmail || undefined}>
                         {p.googleEmail
                           ? p.googleEmail
                           : p.googleUid

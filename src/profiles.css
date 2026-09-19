@@ -257,49 +257,66 @@ dialog .ios-banner.is-dismissing {
   min-height: 40px;
 }
 .profile-list {
-  display: grid;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   margin-bottom: 20px;
   max-height: 360px;
   overflow-y: auto;
-  padding: 4px;
-  margin-left: -4px;
-  margin-right: -4px;
+  overflow-x: hidden;
+  padding: 2px;
+  width: 100%;
+  box-sizing: border-box;
 }
-.profile-choice {
+.profile-choice,
+.profile-item-card {
   display: flex;
   align-items: center;
   text-align: left;
   gap: 12px;
   width: 100%;
-  padding: 16px;
-  min-height: 80px;
-  border-radius: 20px;
+  padding: 14px 16px;
+  min-height: 72px;
+  border-radius: 18px;
   border: 1px solid #d7eeff1c;
   background: linear-gradient(120deg, #d9eaf915, #c4e9fa05);
   box-shadow: inset 0 1px 0 #ffffff10;
-}
-.profile-item-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   position: relative;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.profile-choice:hover,
+.profile-item-card:hover {
+  background: linear-gradient(120deg, #d9eaf925, #c4e9fa0a);
+  border-color: #d7eeff35;
 }
 .profile-item-card .profile-choice {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+  min-height: auto;
+  text-align: left;
+  cursor: pointer;
 }
 .profile-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .profile-action-btn {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
-  border-radius: 14px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: #9fb7c8;
@@ -320,20 +337,26 @@ dialog .ios-banner.is-dismissing {
 .profile-meta-block {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 .profile-choice strong,
 .sidebar-profile strong {
   display: block;
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 500;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .profile-choice small,
 .sidebar-profile small {
   display: block;
   color: #a0b7c7;
-  font-size: 12px;
-  margin-top: 4px;
+  font-size: 11.5px;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .profile-choice > svg,
 .profile-arrow {
@@ -764,24 +787,38 @@ dialog::backdrop {
     display: none;
   }
   .profile-panel {
-    padding: 24px;
-    border-radius: 28px;
+    padding: 20px 16px;
+    border-radius: 26px;
   }
   .profile-panel h2 {
-    font-size: 26px;
+    font-size: 24px;
   }
   .profile-intro {
     font-size: 13px;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
-  .profile-choice {
-    min-height: 72px;
-    padding: 12px;
+  .profile-choice,
+  .profile-item-card {
+    min-height: 64px;
+    padding: 10px 12px;
     border-radius: 16px;
+    gap: 8px;
   }
   .profile-monogram {
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
+    font-size: 15px;
+  }
+  .profile-actions {
+    gap: 4px;
+  }
+  .profile-action-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+  }
+  .profile-item-card .profile-arrow {
+    display: none;
   }
   .profile-list {
     max-height: 280px;
@@ -821,7 +858,25 @@ dialog::backdrop {
     gap: 4px;
   }
   .profile-gate {
-    padding-inline: 20px;
+    padding-inline: 14px;
+  }
+  .profile-panel {
+    padding: 18px 12px;
+  }
+  .profile-choice,
+  .profile-item-card {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .profile-monogram {
+    width: 34px;
+    height: 34px;
+    font-size: 14px;
+  }
+  .profile-action-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
