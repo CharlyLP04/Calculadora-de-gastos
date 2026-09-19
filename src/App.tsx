@@ -1,5 +1,6 @@
 import { DateStrip, IosNotificationBanner } from "./UIEnhancements";
 import { NotificationSettings } from "./NotificationSettings";
+import { showDeviceNotification } from "./notifications";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BrandMark } from "./Brand";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -322,6 +323,24 @@ function ProfileApp() {
       const current = (await db.prefs.get("main")) || defaults;
       await db.prefs.put({ ...current, ...change, prefsUpdated: Date.now() });
     });
+
+  // Notificaciones en el dispositivo para compromisos/pagos de hoy
+  useEffect(() => {
+    if (!prefs.notificationsEnabled || fixed.length === 0) return;
+    const todayStr = today();
+    const key = `clara-notified-${profile?.id || "p"}-${todayStr}`;
+    if (sessionStorage.getItem(key)) return;
+
+    const dueToday = fixed.filter((f) => f.date === todayStr);
+    if (dueToday.length > 0) {
+      sessionStorage.setItem(key, "1");
+      void showDeviceNotification(
+        `Clara · ${profile?.name || "Finanzas"}`,
+        `Tienes ${dueToday.length} pago(s) programado(s) para hoy: ${dueToday.map((p) => p.title).join(", ")}.`,
+        { tag: `clara-due-${todayStr}` },
+      );
+    }
+  }, [prefs.notificationsEnabled, fixed, profile?.id, profile?.name]);
   const handleCheckUpdate = async () => {
     if (!online) {
       notify("Conéctate para buscar una actualización.");
@@ -669,9 +688,10 @@ function ProfileApp() {
         <button
           type="button"
           className="primary add-desktop-btn"
+          aria-label="Nuevo movimiento"
           onClick={() => setForm({ kind: "transaction" })}
         >
-          <Plus size={18} /> Registrar movimiento
+          <Plus size={16} /> Nuevo movimiento
         </button>
 
         {nav()}

@@ -26,8 +26,8 @@ button:active:not(:disabled) {
   transform: scale(0.97);
 }
 .sidebar {
-  width: 208px;
-  padding: 40px 24px;
+  width: 240px;
+  padding: 32px 18px;
   background: #0b141d70;
   border-right: 1px solid #ffffff09;
   backdrop-filter: blur(24px);
@@ -54,7 +54,7 @@ button:active:not(:disabled) {
   height: 36px;
 }
 .side-nav {
-  margin-top: 64px;
+  margin-top: 18px;
   gap: 12px;
 }
 .side-nav button {
@@ -97,8 +97,8 @@ button:active:not(:disabled) {
   padding-top: 24px;
 }
 main {
-  margin-left: 208px;
-  width: calc(100% - 208px);
+  margin-left: 240px;
+  width: calc(100% - 240px);
 }
 .topbar {
   height: 88px;
@@ -753,15 +753,15 @@ dialog hr {
 }
 @media (max-width: 1150px) and (min-width: 901px) {
   .sidebar {
-    width: 184px;
-    padding: 36px 16px;
+    width: 220px;
+    padding: 28px 14px;
   }
   .brand {
     font-size: 28px;
   }
   main {
-    margin-left: 184px;
-    width: calc(100% - 184px);
+    margin-left: 220px;
+    width: calc(100% - 220px);
   }
   .content {
     padding: 24px 28px;

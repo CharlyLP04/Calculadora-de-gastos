@@ -36,6 +36,41 @@
   background: #d3edff0a;
   border: 1px solid #ffffff14;
 }
+.quiet-badge.active {
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+.quiet-badge.error {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.notification-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.notification-settings .field-help {
+  margin: 0;
+  line-height: 1.5;
+}
+.notification-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.notification-actions button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border-radius: 999px;
+  font-weight: 550;
+}
 .ios-banner {
   top: calc(12px + env(safe-area-inset-top));
   border-color: #d8f2ff35;
@@ -851,17 +886,20 @@ dialog::backdrop {
 
 /* Desktop add button in sidebar */
 .add-desktop-btn {
-  margin-top: 24px;
-  margin-bottom: -40px;
+  margin-top: 18px;
+  margin-bottom: 0;
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 44px;
-  border-radius: 14px;
+  min-height: 42px;
+  padding: 10px 14px;
+  border-radius: 12px;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13.5px;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 @media (max-width: 899px) {
   .add-desktop-btn {
