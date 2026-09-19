@@ -67,7 +67,7 @@ import {
   type Prefs,
   type Kind,
 } from "./data";
-import { syncData, waitForSyncIdle, purgeCloudProfileData } from "./firebase";
+import { syncData, waitForSyncIdle } from "./firebase";
 import { exportReport, restoreBackup } from "./reports";
 import { enableLock, unlock, disableLock, hasLock } from "./security";
 import { loginWithGoogle, logoutUser, subscribeToAuth } from "./auth";
@@ -402,14 +402,8 @@ function ProfileApp() {
         try {
           await waitForSyncIdle();
           await wipeAllData();
-          if (canSync && online) {
-            try {
-              await purgeCloudProfileData();
-            } catch (err) {
-              console.warn("No se pudo purgar la nube completamente:", err);
-            }
-          }
           setSyncBlocked(false);
+          if (canSync && online) await syncData();
           chooseProfile();
         } catch {
           notify(

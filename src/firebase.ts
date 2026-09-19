@@ -317,31 +317,7 @@ export const waitForSyncIdle = async () => {
   await pendingSync?.catch(() => {});
 };
 
-export async function purgeCloudProfileData(): Promise<void> {
-  const { uid, profileId } = await requireScope();
-  const firestore = initFirebase();
-  const root = doc(firestore, "clara_users", uid, "profiles", profileId);
-  const entriesCol = collection(root, "entries");
-  const prefsDoc = doc(root, "preferences", "main");
-
-  const snapshot = await getDocsFromServer(entriesCol);
-  const ids = snapshot.docs.map((d) => d.id);
-
-  for (let offset = 0; offset < ids.length; offset += 100) {
-    const chunk = ids.slice(offset, offset + 100);
-    await runTransaction(firestore, async (transaction) => {
-      for (const id of chunk) {
-        transaction.delete(doc(entriesCol, id));
-      }
-    });
-  }
-
-  await runTransaction(firestore, async (transaction) => {
-    transaction.delete(prefsDoc);
-  });
-}
-
-export async function syncData(prefs: Prefs): Promise<number> {
+export async function syncData(prefs?: Prefs): Promise<number> {
   if (isSyncBlocked()) throw new Error("La sincronización está pausada.");
   if (pendingSync) return pendingSync;
   pendingSync = syncWithFirestore(prefs);
