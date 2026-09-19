@@ -61,14 +61,13 @@ import {
   debtRemaining,
   saveEntry,
   removeEntry,
-  syncData,
   wipeAllData,
   setSyncBlocked,
-  waitForSyncIdle,
   type Entry,
   type Prefs,
   type Kind,
 } from "./data";
+import { syncData, waitForSyncIdle } from "./firebase";
 import { exportReport, restoreBackup } from "./reports";
 import { enableLock, unlock, disableLock, hasLock } from "./security";
 import { loginWithGoogle, logoutUser, subscribeToAuth } from "./auth";
@@ -137,6 +136,130 @@ function Modal({
     </dialog>
   );
 }
+
+interface ConfirmState {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  isDestructive?: boolean;
+  onConfirm: () => void | Promise<void>;
+}
+
+function ConfirmModal({
+  title,
+  message,
+  confirmLabel = "Confirmar",
+  cancelLabel = "Cancelar",
+  isDestructive = true,
+  onConfirm,
+  onClose,
+}: ConfirmState & { onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    ref.current?.showModal();
+    return () => ref.current?.close();
+  }, []);
+
+  return (
+    <dialog
+      ref={ref}
+      className="confirm-dialog"
+      onCancel={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        maxWidth: "420px",
+        width: "90%",
+        padding: "24px",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: "12px",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: "1.2rem",
+              fontWeight: 600,
+              margin: 0,
+              lineHeight: 1.3,
+            }}
+          >
+            {title}
+          </h2>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Cerrar"
+            onClick={onClose}
+            style={{ minWidth: "36px", minHeight: "36px" }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <p
+          style={{
+            margin: 0,
+            color: "var(--muted, #94a3b8)",
+            fontSize: "0.95rem",
+            lineHeight: 1.55,
+          }}
+        >
+          {message}
+        </p>
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            justifyContent: "flex-end",
+            marginTop: "8px",
+          }}
+        >
+          <button
+            type="button"
+            className="secondary"
+            onClick={onClose}
+            style={{ minHeight: "44px", padding: "0 18px" }}
+          >
+            {cancelLabel}
+          </button>
+          <button
+            type="button"
+            className={isDestructive ? "danger-btn" : "primary"}
+            onClick={async () => {
+              onClose();
+              await onConfirm();
+            }}
+            style={
+              isDestructive
+                ? {
+                    background: "rgba(239, 68, 68, 0.15)",
+                    color: "#f87171",
+                    border: "1px solid rgba(239, 68, 68, 0.4)",
+                    minHeight: "44px",
+                    padding: "0 18px",
+                    borderRadius: "10px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }
+                : { minHeight: "44px", padding: "0 18px", cursor: "pointer" }
+            }
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
 export default function App() {
   return (
     <ProfileGate>
@@ -170,7 +293,8 @@ function ProfileApp() {
     [currentUser, setCurrentUser] = useState<User | null>(null),
     [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "error">(
       "idle",
-    );
+    ),
+    [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   useEffect(() => subscribeToAuth(setCurrentUser), []);
   const month = date.slice(0, 7),
     live = entries.filter((e) => !e.deleted),
@@ -262,29 +386,32 @@ function ProfileApp() {
     }, "Google desconectado. Este perfil sigue guardado aquí.");
     setBusy(false);
   };
-  const handleWipeAllData = async () => {
-    if (
-      !confirm(
-        `¿Vaciar el perfil «${profile?.name}»? Se eliminarán sus movimientos, cuentas, fijos y deudas. Si conectas Google, se reflejará en su respaldo. Los demás perfiles no cambian. Guarda un respaldo antes; no se puede deshacer.`,
-      )
-    )
-      return;
-    setBusy(true);
-    setSyncBlocked(true);
-    try {
-      await waitForSyncIdle();
-      await wipeAllData();
-      setSyncBlocked(false);
-      if (canSync && online) await syncData(prefs);
-      chooseProfile();
-    } catch {
-      notify(
-        "El perfil se conserva localmente. No se pudo completar la operación en Google; revisa la conexión antes de intentarlo otra vez.",
-      );
-    } finally {
-      setSyncBlocked(false);
-    }
-    setBusy(false);
+  const handleWipeAllData = () => {
+    setConfirmState({
+      title: `¿Vaciar el perfil «${profile?.name || "activo"}»?`,
+      message:
+        "Se eliminarán todos sus movimientos, cuentas, gastos fijos y deudas de este dispositivo y de su respaldo en la nube si está conectado. Descarga un respaldo antes de continuar, ya que esta acción es permanente.",
+      confirmLabel: "Vaciar perfil",
+      isDestructive: true,
+      onConfirm: async () => {
+        setBusy(true);
+        setSyncBlocked(true);
+        try {
+          await waitForSyncIdle();
+          await wipeAllData();
+          setSyncBlocked(false);
+          if (canSync && online) await syncData(prefs);
+          chooseProfile();
+        } catch {
+          notify(
+            "El perfil se conserva localmente. No se pudo completar la operación en Google; revisa la conexión antes de intentarlo otra vez.",
+          );
+        } finally {
+          setSyncBlocked(false);
+          setBusy(false);
+        }
+      },
+    });
   };
   useEffect(() => {
     void db.prefs
@@ -396,12 +523,18 @@ function ProfileApp() {
     )
     .sort((a, b) => b.date.localeCompare(a.date) || b.updated - a.updated);
   const deleteItem = (e: Entry) => {
-    if (
-      confirm(
-        `¿Eliminar “${e.title}”?${e.kind === "debt" ? " Los pagos realizados se conservarán." : ""}`,
-      )
-    )
-      void run(() => removeEntry(e), "Registro eliminado");
+    setConfirmState({
+      title: `¿Eliminar “${e.title}”?`,
+      message:
+        e.kind === "debt"
+          ? "Esta deuda se eliminará de los compromisos activos. Los pagos y abonos realizados se conservarán en tu historial."
+          : `Se eliminará este movimiento de ${money(e.amount)} de tu contabilidad y balances.`,
+      confirmLabel: "Eliminar",
+      isDestructive: true,
+      onConfirm: () => {
+        void run(() => removeEntry(e), "Registro eliminado");
+      },
+    });
   };
   const renderTx = (list: Entry[]) =>
     list.length ? (
@@ -1622,13 +1755,21 @@ function ProfileApp() {
                 accept=".json,application/json"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (
-                    file &&
-                    confirm(
-                      "El respaldo reemplazará tus registros actuales. ¿Continuar?",
-                    )
-                  )
-                    void run(() => restoreBackup(file), "Respaldo restaurado");
+                  if (file) {
+                    setConfirmState({
+                      title: "¿Restaurar respaldo?",
+                      message:
+                        "El archivo reemplazará los registros actuales de este perfil con la información del respaldo. Esta acción no se puede deshacer.",
+                      confirmLabel: "Restaurar",
+                      isDestructive: true,
+                      onConfirm: () => {
+                        void run(
+                          () => restoreBackup(file),
+                          "Respaldo restaurado",
+                        );
+                      },
+                    });
+                  }
                   e.target.value = "";
                 }}
               />
@@ -1720,6 +1861,12 @@ function ProfileApp() {
           </div>
           <Credits />
         </Modal>
+      )}
+      {confirmState && (
+        <ConfirmModal
+          {...confirmState}
+          onClose={() => setConfirmState(null)}
+        />
       )}
     </div>
   );

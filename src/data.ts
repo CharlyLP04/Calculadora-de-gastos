@@ -220,7 +220,6 @@ export function validEntries(value: unknown): value is Entry[] {
     );
   });
 }
-let pendingSync: Promise<number> | undefined;
 let syncBlocked = false;
 let syncGeneration = 0;
 
@@ -229,26 +228,11 @@ export function setSyncBlocked(blocked: boolean) {
   syncBlocked = blocked;
 }
 export const getSyncGeneration = () => syncGeneration;
-export const waitForSyncIdle = async () => {
-  await pendingSync?.catch(() => {});
-};
 
 export function isSyncBlocked(): boolean {
   return syncBlocked;
 }
 
-export async function syncData(prefs: Prefs): Promise<number> {
-  if (syncBlocked) throw new Error("La sincronización está pausada.");
-  if (pendingSync) return pendingSync;
-  pendingSync = import("./firebase").then(({ syncWithFirestore }) =>
-    syncWithFirestore(prefs),
-  );
-  try {
-    return await pendingSync;
-  } finally {
-    pendingSync = undefined;
-  }
-}
 export async function seedDemo() {
   if (await db.entries.filter((e) => !e.deleted).count())
     throw new Error(

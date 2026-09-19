@@ -18,6 +18,7 @@ import {
 import { getAuth } from "firebase/auth";
 import {
   db,
+  Database,
   defaults,
   validEntries,
   isSyncBlocked,
@@ -286,7 +287,6 @@ export async function recoverCloudProfile(
       throw new Error("El respaldo anterior contiene datos no válidos.");
     if (getAuth(getFirebaseApp()).currentUser?.uid !== user.uid)
       throw new Error("La cuenta cambió. Vuelve a intentarlo.");
-    const { Database } = await import("./data");
     const target = new Database(profile.id);
     try {
       await target.entries.bulkPut(entries);
@@ -310,4 +310,20 @@ export async function recoverCloudProfile(
   }
   await registry.profiles.add(profile);
   return profile;
+}
+
+let pendingSync: Promise<number> | undefined;
+export const waitForSyncIdle = async () => {
+  await pendingSync?.catch(() => {});
+};
+
+export async function syncData(prefs: Prefs): Promise<number> {
+  if (isSyncBlocked()) throw new Error("La sincronización está pausada.");
+  if (pendingSync) return pendingSync;
+  pendingSync = syncWithFirestore(prefs);
+  try {
+    return await pendingSync;
+  } finally {
+    pendingSync = undefined;
+  }
 }

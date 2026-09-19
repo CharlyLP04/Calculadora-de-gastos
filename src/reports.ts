@@ -161,8 +161,14 @@ export async function exportReport(
 export async function restoreBackup(file: File) {
   if (file.size > 20 * 1024 * 1024)
     throw new Error("El respaldo supera 20 MB.");
-  const data = JSON.parse(await file.text());
+  let data: any;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    throw new Error("El archivo no tiene un formato JSON válido o está dañado.");
+  }
   if (
+    !data ||
     data.version !== 1 ||
     !validEntries(data.entries) ||
     typeof data.budget !== "number" ||
