@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   ArrowRight,
@@ -29,6 +29,219 @@ import {
   type CloudProfile,
 } from "./firebase";
 
+function RenameProfileModal({
+  profileName,
+  busy,
+  onClose,
+  onSave,
+}: {
+  profileName: string;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (newName: string) => Promise<void>;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [name, setName] = useState(profileName);
+
+  useEffect(() => {
+    ref.current?.showModal();
+    return () => ref.current?.close();
+  }, []);
+
+  return (
+    <dialog
+      ref={ref}
+      className="confirm-dialog sheet-dialog"
+      onCancel={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        maxWidth: "400px",
+        width: "90%",
+        padding: "24px",
+      }}
+    >
+      <div className="sheet-grabber" aria-hidden="true" />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "16px",
+        }}
+      >
+        <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>
+          Renombrar cartera
+        </h3>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Cerrar"
+          onClick={onClose}
+        >
+          <X size={18} />
+        </button>
+      </div>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const trimmed = name.trim();
+          if (trimmed) {
+            await onSave(trimmed);
+          }
+        }}
+        style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+      >
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            fontSize: "14px",
+          }}
+        >
+          Nuevo nombre:
+          <input
+            type="text"
+            value={name}
+            maxLength={40}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+            required
+          />
+        </label>
+        <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="secondary"
+            onClick={onClose}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="primary"
+            disabled={busy || !name.trim()}
+          >
+            <Check size={16} /> Guardar
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+function DeleteProfileModal({
+  profileName,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  profileName: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    ref.current?.showModal();
+    return () => ref.current?.close();
+  }, []);
+
+  return (
+    <dialog
+      ref={ref}
+      className="confirm-dialog sheet-dialog"
+      onCancel={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        maxWidth: "420px",
+        width: "90%",
+        padding: "24px",
+      }}
+    >
+      <div className="sheet-grabber" aria-hidden="true" />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: "12px",
+        }}
+      >
+        <h3
+          style={{
+            margin: 0,
+            fontSize: "1.2rem",
+            fontWeight: 600,
+            color: "#f87171",
+          }}
+        >
+          ¿Eliminar «{profileName}»?
+        </h3>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Cerrar"
+          onClick={onClose}
+        >
+          <X size={18} />
+        </button>
+      </div>
+      <p
+        style={{
+          margin: 0,
+          color: "var(--muted, #94a3b8)",
+          fontSize: "0.95rem",
+          lineHeight: 1.5,
+        }}
+      >
+        Se eliminarán permanentemente todas las cuentas, deudas y movimientos
+        asociados a esta cartera en este equipo.
+      </p>
+      <div
+        style={{
+          display: "flex",
+          gap: "10px",
+          justifyContent: "flex-end",
+          marginTop: "20px",
+        }}
+      >
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy}
+          onClick={onClose}
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          className="danger-btn"
+          disabled={busy}
+          style={{
+            background: "rgba(239, 68, 68, 0.15)",
+            color: "#f87171",
+            border: "1px solid rgba(239, 68, 68, 0.4)",
+            minHeight: "44px",
+            padding: "0 18px",
+            borderRadius: "10px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+          onClick={onConfirm}
+        >
+          <Trash2 size={16} /> Eliminar cartera
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
 export function Credits() {
   return (
     <footer className="maker-credit">
@@ -38,8 +251,8 @@ export function Credits() {
       <img
         src={`${import.meta.env.BASE_URL}grid-mx.png`}
         alt="Grid.mx · Pensamos en código. Creamos soluciones."
-        width="882"
-        height="386"
+        width="786"
+        height="325"
       />
     </footer>
   );
@@ -85,7 +298,6 @@ export function ProfileGate({ children }: { children: ReactNode }) {
     id: string;
     name: string;
   } | null>(null);
-  const [editName, setEditName] = useState("");
   const [deletingProfile, setDeletingProfile] = useState<{
     id: string;
     name: string;
@@ -324,7 +536,6 @@ export function ProfileGate({ children }: { children: ReactNode }) {
                       disabled={busy}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setEditName(p.name);
                         setEditingProfile({ id: p.id, name: p.name });
                       }}
                     >
@@ -390,133 +601,32 @@ export function ProfileGate({ children }: { children: ReactNode }) {
 
         {/* Modal para renombrar cartera */}
         {editingProfile && (
-          <dialog
-            open
-            className="confirm-dialog sheet-dialog"
-            style={{
-              maxWidth: "400px",
-              width: "90%",
-              padding: "24px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "16px",
+          <RenameProfileModal
+            profileName={editingProfile.name}
+            busy={busy}
+            onClose={() => setEditingProfile(null)}
+            onSave={async (trimmed) => {
+              await run(async () => {
+                await renameProfile(editingProfile.id, trimmed);
+                setEditingProfile(null);
+              });
             }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>Renombrar cartera</h3>
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="Cerrar"
-                onClick={() => setEditingProfile(null)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const trimmed = editName.trim();
-                if (trimmed) {
-                  await run(async () => {
-                    await renameProfile(editingProfile.id, trimmed);
-                    setEditingProfile(null);
-                  });
-                }
-              }}
-              style={{ display: "flex", flexDirection: "column", gap: "16px" }}
-            >
-              <label style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "14px" }}>
-                Nuevo nombre:
-                <input
-                  type="text"
-                  value={editName}
-                  maxLength={40}
-                  onChange={(e) => setEditName(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </label>
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setEditingProfile(null)}
-                >
-                  Cancelar
-                </button>
-                <button type="submit" className="primary" disabled={busy || !editName.trim()}>
-                  <Check size={16} /> Guardar
-                </button>
-              </div>
-            </form>
-          </dialog>
+          />
         )}
 
         {/* Modal de confirmación para eliminar cartera */}
         {deletingProfile && (
-          <dialog
-            open
-            className="confirm-dialog sheet-dialog"
-            style={{
-              maxWidth: "420px",
-              width: "90%",
-              padding: "24px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "16px",
+          <DeleteProfileModal
+            profileName={deletingProfile.name}
+            busy={busy}
+            onClose={() => setDeletingProfile(null)}
+            onConfirm={async () => {
+              await run(async () => {
+                await deleteProfile(deletingProfile.id);
+                setDeletingProfile(null);
+              });
             }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 600, color: "#f87171" }}>
-                ¿Eliminar «{deletingProfile.name}»?
-              </h3>
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="Cerrar"
-                onClick={() => setDeletingProfile(null)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <p style={{ margin: 0, color: "var(--muted, #94a3b8)", fontSize: "0.95rem", lineHeight: 1.5 }}>
-              Se eliminarán permanentemente todas las cuentas, deudas y movimientos asociados a esta cartera en este equipo.
-            </p>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "8px" }}>
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy}
-                onClick={() => setDeletingProfile(null)}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="danger-btn"
-                disabled={busy}
-                style={{
-                  background: "rgba(239, 68, 68, 0.15)",
-                  color: "#f87171",
-                  border: "1px solid rgba(239, 68, 68, 0.4)",
-                  minHeight: "44px",
-                  padding: "0 18px",
-                  borderRadius: "10px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-                onClick={() =>
-                  void run(async () => {
-                    await deleteProfile(deletingProfile.id);
-                    setDeletingProfile(null);
-                  })
-                }
-              >
-                <Trash2 size={16} /> Eliminar cartera
-              </button>
-            </div>
-          </dialog>
+          />
         )}
 
         <Credits />
