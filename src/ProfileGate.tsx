@@ -245,9 +245,6 @@ function DeleteProfileModal({
 export function Credits() {
   return (
     <footer className="maker-credit">
-      <span>
-        Desarrollado por <strong>charly_dev</strong>
-      </span>
       <img
         src={`${import.meta.env.BASE_URL}grid-mx.png`}
         alt="Grid.mx · Pensamos en código. Creamos soluciones."
