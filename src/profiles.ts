@@ -92,7 +92,31 @@ export async function linkProfile(uid: string, email: string | null) {
     });
   });
 }
+export async function renameProfile(id: string, name: string): Promise<void> {
+  const clean = name.trim();
+  if (!clean || clean.length > 40)
+    throw new Error("Escribe un nombre de 1 a 40 caracteres.");
+  if (!(await registry.profiles.get(id)))
+    throw new Error("No se encontró el perfil.");
+  await registry.profiles.update(id, { name: clean });
+}
+export async function deleteProfile(id: string): Promise<void> {
+  if (!(await registry.profiles.get(id)))
+    throw new Error("No se encontró el perfil.");
+  await registry.profiles.delete(id);
+  const dbName = profileDatabaseName(id);
+  try {
+    await Dexie.delete(dbName);
+  } catch {}
+  if (
+    typeof sessionStorage !== "undefined" &&
+    sessionStorage.getItem("clara-active-profile") === id
+  ) {
+    sessionStorage.removeItem("clara-active-profile");
+  }
+}
 export async function pauseCloud() {
   if (sessionProfileId)
     await registry.profiles.update(sessionProfileId, { cloudEnabled: false });
 }
+

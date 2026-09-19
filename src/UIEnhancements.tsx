@@ -269,16 +269,24 @@ export function DateStrip({
         const day = month + "-" + String(i + 1).padStart(2, "0");
         const ds = summarize(entries, month, day, budget);
         const isSelected = day === date;
+        const dateFormatted = new Date(day + "T12:00:00").toLocaleDateString(
+          "es-MX",
+          { day: "numeric", month: "long" },
+        );
+        const hasExpenses = ds.dayTx.length > 0;
+        const isOver = hasExpenses && ds.dayExpense > ds.allowance;
+        const statusText = hasExpenses
+          ? isOver
+            ? `Sobre el límite: $${Math.round(ds.dayExpense)} gastados de $${Math.round(ds.allowance)} sugeridos`
+            : `Dentro del presupuesto: $${Math.round(ds.dayExpense)} gastados`
+          : "Sin gastos";
 
         return (
           <button
             type="button"
             data-day={day}
             aria-pressed={isSelected}
-            aria-label={new Date(day + "T12:00:00").toLocaleDateString(
-              "es-MX",
-              { day: "numeric", month: "long" },
-            )}
+            aria-label={`${dateFormatted}. ${statusText}`}
             className={isSelected ? "selected" : ""}
             key={day}
             onClick={() => {
@@ -295,12 +303,13 @@ export function DateStrip({
             <strong>{String(i + 1).padStart(2, "0")}</strong>
             <i
               className={
-                ds.dayTx.length
-                  ? ds.dayExpense > ds.allowance
-                    ? "red-dot"
+                hasExpenses
+                  ? isOver
+                    ? "red-dot has-warning"
                     : "green-dot"
                   : ""
               }
+              aria-hidden="true"
             />
           </button>
         );

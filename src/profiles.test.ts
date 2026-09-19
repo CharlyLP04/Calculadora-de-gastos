@@ -15,6 +15,8 @@ import {
   pauseCloud,
   cloudScope,
   profileDatabaseName,
+  renameProfile,
+  deleteProfile,
 } from "./profiles";
 const other = new Database("test-other");
 const legacy = new Database("legacy");
@@ -117,4 +119,19 @@ describe("perfiles locales", () => {
     expect((await other.entries.get(e.id))?.deleted).toBeUndefined();
     expect((await db.prefs.get("main"))?.prefsUpdated).toBeGreaterThan(1);
   });
+  it("permite renombrar un perfil local", async () => {
+    const p = await createProfile("Gastos Viejos");
+    await renameProfile(p.id, "Personal");
+    expect((await registry.profiles.get(p.id))?.name).toBe("Personal");
+    await expect(renameProfile(p.id, "   ")).rejects.toThrow();
+    await expect(renameProfile("non-existent", "Nuevo")).rejects.toThrow();
+  });
+  it("permite eliminar un perfil y purgar su almacenamiento", async () => {
+    const p = await createProfile("Temporal");
+    expect(await registry.profiles.get(p.id)).toBeDefined();
+    await deleteProfile(p.id);
+    expect(await registry.profiles.get(p.id)).toBeUndefined();
+    await expect(deleteProfile("non-existent")).rejects.toThrow();
+  });
 });
+

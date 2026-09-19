@@ -7,6 +7,10 @@ import {
   Cloud,
   ChevronLeft,
   LoaderCircle,
+  Pencil,
+  Trash2,
+  X,
+  Check,
 } from "lucide-react";
 import { BrandMark } from "./Brand";
 import {
@@ -14,9 +18,11 @@ import {
   initializeProfiles,
   createProfile,
   openProfile,
+  renameProfile,
+  deleteProfile,
   sessionProfileId,
 } from "./profiles";
-import { loginWithGoogle } from "./auth";
+import { loginWithGoogle, handleAuthRedirectResult } from "./auth";
 import {
   listCloudProfiles,
   recoverCloudProfile,
@@ -38,6 +44,7 @@ export function Credits() {
     </footer>
   );
 }
+
 export function GoogleMark() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
@@ -60,6 +67,7 @@ export function GoogleMark() {
     </svg>
   );
 }
+
 export function ProfileGate({ children }: { children: ReactNode }) {
   const profiles = useLiveQuery(
     () => registry.profiles.orderBy("created").toArray(),
@@ -71,6 +79,18 @@ export function ProfileGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [cloud, setCloud] = useState<CloudProfile[] | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
+
+  // Estados para gestionar perfiles (renombrar y eliminar)
+  const [editingProfile, setEditingProfile] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [editName, setEditName] = useState("");
+  const [deletingProfile, setDeletingProfile] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
   useEffect(() => {
     initializeProfiles()
       .then(() => setReady(true))
@@ -79,6 +99,23 @@ export function ProfileGate({ children }: { children: ReactNode }) {
           "No se pudo abrir el almacenamiento. Revisa los permisos del navegador y vuelve a cargar.",
         ),
       );
+
+    // Revisar si volvimos de una redirección de autenticación de Google en móvil
+    void handleAuthRedirectResult().then(async (user) => {
+      if (user) {
+        try {
+          const cloudProfiles = await listCloudProfiles();
+          setCloud(cloudProfiles);
+        } catch (e) {
+          setError(
+            e instanceof Error
+              ? e.message
+              : "No se pudieron recuperar las carteras de Google.",
+          );
+        }
+      }
+    });
+
     const update = () => setOnline(navigator.onLine);
     window.addEventListener("online", update);
     window.addEventListener("offline", update);
@@ -87,6 +124,7 @@ export function ProfileGate({ children }: { children: ReactNode }) {
       window.removeEventListener("offline", update);
     };
   }, []);
+
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError("");
@@ -102,8 +140,10 @@ export function ProfileGate({ children }: { children: ReactNode }) {
       setBusy(false);
     }
   };
+
   if (ready && profiles?.some((p) => p.id === sessionProfileId))
     return children;
+
   return (
     <div className="profile-gate">
       <div className="ambient-orb orb-one" aria-hidden="true" />
@@ -129,9 +169,9 @@ export function ProfileGate({ children }: { children: ReactNode }) {
             <em>Tu espacio.</em>
           </h1>
           <p>
-            Cada perfil tiene su propia cartera.
+            Cada cartera mantiene tus movimientos separados.
             <br />
-            Empieza aquí. Llévala contigo cuando quieras.
+            Privado en tu equipo. Con Google opcional.
           </p>
         </div>
         <div className="welcome-wallet" aria-hidden="true">
@@ -140,7 +180,7 @@ export function ProfileGate({ children }: { children: ReactNode }) {
           <div className="wallet-line" />
           <div className="wallet-line short" />
           <span className="wallet-local">
-            <Smartphone size={14} /> Primero, en tu dispositivo
+            <Smartphone size={14} /> Primero en tu dispositivo
           </span>
         </div>
       </section>
@@ -159,24 +199,25 @@ export function ProfileGate({ children }: { children: ReactNode }) {
               setError("");
             }}
           >
-            <ChevronLeft size={16} /> Volver
+            <ChevronLeft size={16} /> Volver a mis carteras
           </button>
         )}
-        <span className="eyebrow">TU ESPACIO PERSONAL</span>
+        <span className="eyebrow">CLARA · FINANZAS</span>
         <h2 id="profile-heading">
           {creating
-            ? "Dale un nombre."
+            ? "Nueva cartera"
             : cloud !== null
-              ? "Tu cartera, contigo."
-              : "Elige tu perfil."}
+              ? "Carteras en Google"
+              : "Tus carteras"}
         </h2>
         <p className="profile-intro">
           {creating
-            ? "Sus movimientos y ajustes se guardarán por separado en este dispositivo."
+            ? "Asigna un nombre para tus cuentas y movimientos en este equipo."
             : cloud !== null
-              ? "Elige el perfil de Google que quieres guardar también en este equipo."
-              : "Tus finanzas se guardan aquí. Conectar Google es opcional."}
+              ? "Selecciona una cartera guardada en tu cuenta Google para usarla aquí."
+              : "Selecciona una cartera para continuar o crea una nueva."}
         </p>
+
         {(!ready || !profiles) && !error ? (
           <p className="loading-profiles" role="status">
             <LoaderCircle className="spin" size={20} /> Preparando tu espacio…
@@ -196,30 +237,30 @@ export function ProfileGate({ children }: { children: ReactNode }) {
             }}
           >
             <label>
-              Nombre del perfil
+              Nombre de la cartera
               <input
                 name="name"
                 maxLength={40}
-                placeholder="Por ejemplo, Charly"
+                placeholder="Ej. Personal, Escuela o Negocio"
                 required
                 autoFocus
                 autoComplete="off"
               />
             </label>
             <button className="primary full" disabled={busy}>
-              {busy ? "Creando…" : "Crear mi espacio"}
+              {busy ? "Creando…" : "Crear cartera"}
               <ArrowRight size={18} />
             </button>
             <span className="local-caption">
-              <Smartphone size={14} /> Sin cuenta, sin conexión obligatoria.
+              <Smartphone size={14} /> Sin cuenta obligatoria. Tus datos se guardan aquí.
             </span>
           </form>
         ) : cloud !== null ? (
           <div className="profile-list">
             {cloud.length === 0 && (
               <p className="field-help">
-                Aún no tienes perfiles guardados en esta cuenta. Crea uno local
-                y conecta Google desde Configuración.
+                No hay carteras guardadas en esta cuenta Google. Crea una local
+                y podrás conectarla desde Configuración.
               </p>
             )}
             {cloud.map((p) => (
@@ -241,7 +282,7 @@ export function ProfileGate({ children }: { children: ReactNode }) {
                   <strong>{p.name}</strong>
                   <small>
                     {p.legacy
-                      ? "Recuperar en un perfil separado"
+                      ? "Recuperar respaldo anterior"
                       : "Guardar en este dispositivo"}
                   </small>
                 </span>
@@ -253,37 +294,72 @@ export function ProfileGate({ children }: { children: ReactNode }) {
           <>
             <div className="profile-list">
               {profiles?.map((p) => (
-                <button
-                  className="profile-choice"
-                  key={p.id}
-                  disabled={busy}
-                  onClick={() => void run(() => openProfile(p.id))}
-                >
-                  <span className="profile-monogram">
-                    {p.name[0].toLocaleUpperCase()}
-                  </span>
-                  <span>
-                    <strong>{p.name}</strong>
-                    <small>
-                      {p.googleUid
-                        ? "Local · Google vinculado"
-                        : "Solo en este dispositivo"}
-                    </small>
-                  </span>
-                  <ArrowRight size={18} />
-                </button>
+                <div className="profile-item-card" key={p.id}>
+                  <button
+                    className="profile-choice"
+                    disabled={busy}
+                    onClick={() => void run(() => openProfile(p.id))}
+                  >
+                    <span className="profile-monogram">
+                      {p.name[0]?.toLocaleUpperCase() || "C"}
+                    </span>
+                    <span className="profile-meta-block">
+                      <strong>{p.name}</strong>
+                      <small>
+                        {p.googleEmail
+                          ? p.googleEmail
+                          : p.googleUid
+                            ? "Google conectado"
+                            : "Solo en este dispositivo"}
+                      </small>
+                    </span>
+                    <ArrowRight size={18} className="profile-arrow" />
+                  </button>
+                  <div className="profile-actions">
+                    <button
+                      type="button"
+                      className="profile-action-btn"
+                      aria-label={`Renombrar ${p.name}`}
+                      title="Renombrar cartera"
+                      disabled={busy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditName(p.name);
+                        setEditingProfile({ id: p.id, name: p.name });
+                      }}
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="profile-action-btn danger"
+                      aria-label={`Eliminar ${p.name}`}
+                      title="Eliminar cartera"
+                      disabled={busy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingProfile({ id: p.id, name: p.name });
+                      }}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
+
             <button
               className="primary full"
               disabled={busy || !ready}
               onClick={() => setCreating(true)}
             >
-              <Plus size={18} /> Crear perfil local
+              <Plus size={18} /> Nueva cartera
             </button>
+
             <div className="profile-divider">
-              <span>¿Ya usas Clara en otro equipo?</span>
+              <span>o sincroniza con la nube</span>
             </div>
+
             <button
               className="google-login-btn"
               disabled={busy || !online || !ready}
@@ -295,20 +371,154 @@ export function ProfileGate({ children }: { children: ReactNode }) {
               }
             >
               <GoogleMark />
-              {busy ? "Conectando…" : "Recuperar de Google"}
+              {busy ? "Conectando…" : "Sincronizar con Google"}
             </button>
           </>
         )}
+
         {!online && (
           <p className="field-help">
-            Estás sin conexión. Tus perfiles locales siguen disponibles.
+            Estás sin conexión. Tus carteras locales siguen disponibles.
           </p>
         )}
+
         {error && (
           <p className="inline-notice" role="alert">
             {error}
           </p>
         )}
+
+        {/* Modal para renombrar cartera */}
+        {editingProfile && (
+          <dialog
+            open
+            className="confirm-dialog sheet-dialog"
+            style={{
+              maxWidth: "400px",
+              width: "90%",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>Renombrar cartera</h3>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Cerrar"
+                onClick={() => setEditingProfile(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const trimmed = editName.trim();
+                if (trimmed) {
+                  await run(async () => {
+                    await renameProfile(editingProfile.id, trimmed);
+                    setEditingProfile(null);
+                  });
+                }
+              }}
+              style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+            >
+              <label style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "14px" }}>
+                Nuevo nombre:
+                <input
+                  type="text"
+                  value={editName}
+                  maxLength={40}
+                  onChange={(e) => setEditName(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </label>
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setEditingProfile(null)}
+                >
+                  Cancelar
+                </button>
+                <button type="submit" className="primary" disabled={busy || !editName.trim()}>
+                  <Check size={16} /> Guardar
+                </button>
+              </div>
+            </form>
+          </dialog>
+        )}
+
+        {/* Modal de confirmación para eliminar cartera */}
+        {deletingProfile && (
+          <dialog
+            open
+            className="confirm-dialog sheet-dialog"
+            style={{
+              maxWidth: "420px",
+              width: "90%",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 600, color: "#f87171" }}>
+                ¿Eliminar «{deletingProfile.name}»?
+              </h3>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Cerrar"
+                onClick={() => setDeletingProfile(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p style={{ margin: 0, color: "var(--muted, #94a3b8)", fontSize: "0.95rem", lineHeight: 1.5 }}>
+              Se eliminarán permanentemente todas las cuentas, deudas y movimientos asociados a esta cartera en este equipo.
+            </p>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "8px" }}>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => setDeletingProfile(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="danger-btn"
+                disabled={busy}
+                style={{
+                  background: "rgba(239, 68, 68, 0.15)",
+                  color: "#f87171",
+                  border: "1px solid rgba(239, 68, 68, 0.4)",
+                  minHeight: "44px",
+                  padding: "0 18px",
+                  borderRadius: "10px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+                onClick={() =>
+                  void run(async () => {
+                    await deleteProfile(deletingProfile.id);
+                    setDeletingProfile(null);
+                  })
+                }
+              >
+                <Trash2 size={16} /> Eliminar cartera
+              </button>
+            </div>
+          </dialog>
+        )}
+
         <Credits />
       </section>
     </div>

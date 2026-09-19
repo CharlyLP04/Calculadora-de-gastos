@@ -67,7 +67,7 @@ import {
   type Prefs,
   type Kind,
 } from "./data";
-import { syncData, waitForSyncIdle } from "./firebase";
+import { syncData, waitForSyncIdle, purgeCloudProfileData } from "./firebase";
 import { exportReport, restoreBackup } from "./reports";
 import { enableLock, unlock, disableLock, hasLock } from "./security";
 import { loginWithGoogle, logoutUser, subscribeToAuth } from "./auth";
@@ -121,11 +121,13 @@ function Modal({
   return (
     <dialog
       ref={ref}
+      className="sheet-dialog"
       onCancel={onClose}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
+      <div className="sheet-grabber" aria-hidden="true" />
       <div className="modal-head">
         <h2>{title}</h2>
         <button className="icon-btn" aria-label="Cerrar" onClick={onClose}>
@@ -164,7 +166,7 @@ function ConfirmModal({
   return (
     <dialog
       ref={ref}
-      className="confirm-dialog"
+      className="confirm-dialog sheet-dialog"
       onCancel={onClose}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -175,6 +177,7 @@ function ConfirmModal({
         padding: "24px",
       }}
     >
+      <div className="sheet-grabber" aria-hidden="true" />
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
         <div
           style={{
@@ -399,8 +402,14 @@ function ProfileApp() {
         try {
           await waitForSyncIdle();
           await wipeAllData();
+          if (canSync && online) {
+            try {
+              await purgeCloudProfileData();
+            } catch (err) {
+              console.warn("No se pudo purgar la nube completamente:", err);
+            }
+          }
           setSyncBlocked(false);
-          if (canSync && online) await syncData(prefs);
           chooseProfile();
         } catch {
           notify(
@@ -598,36 +607,30 @@ function ProfileApp() {
       className={mobile ? "mobile-nav" : "side-nav"}
       aria-label="Navegación principal"
     >
-      {(["Inicio", "Diario", "Añadir", "Fijos", "Balances"] as const).map(
-        (label) => {
-          const Icon = {
-            Inicio: LayoutDashboard,
-            Diario: CalendarDays,
-            Añadir: Plus,
-            Fijos: Landmark,
-            Balances: ChartNoAxesCombined,
-          }[label];
-          return (
-            <button
-              key={label}
-              aria-label={label}
-              aria-current={label === tab ? "page" : undefined}
-              className={`${label === tab ? "active" : ""} ${label === "Añadir" ? "add-nav" : ""}`}
-              onClick={() => {
-                if (label === "Añadir") setForm({ kind: "transaction" });
-                else {
-                  setTab(label);
-                  setSearch("");
-                }
-              }}
-            >
-              <Icon size={mobile ? 20 : 20} />
-              <span>{label}</span>
-              {!mobile && label === tab && <span className="nav-mark" />}
-            </button>
-          );
-        },
-      )}
+      {(["Inicio", "Diario", "Fijos", "Balances"] as const).map((label) => {
+        const Icon = {
+          Inicio: LayoutDashboard,
+          Diario: CalendarDays,
+          Fijos: Landmark,
+          Balances: ChartNoAxesCombined,
+        }[label];
+        return (
+          <button
+            key={label}
+            aria-label={label}
+            aria-current={label === tab ? "page" : undefined}
+            className={label === tab ? "active" : ""}
+            onClick={() => {
+              setTab(label);
+              setSearch("");
+            }}
+          >
+            <Icon size={20} />
+            <span>{label}</span>
+            {!mobile && label === tab && <span className="nav-mark" />}
+          </button>
+        );
+      })}
     </nav>
   );
   if (locked)
@@ -668,6 +671,14 @@ function ProfileApp() {
           </span>
           clara
         </a>
+
+        <button
+          type="button"
+          className="primary add-desktop-btn"
+          onClick={() => setForm({ kind: "transaction" })}
+        >
+          <Plus size={18} /> Registrar movimiento
+        </button>
 
         {nav()}
         <div className="sidebar-bottom">
@@ -926,7 +937,7 @@ function ProfileApp() {
                             >
                               <span className="account-top">
                                 <CreditCard size={19} />
-                                <span>0{i + 1}</span>
+                                <span className="account-tag">Cuenta</span>
                               </span>
                               <span>{a.title}</span>
                               <strong>{fmt(balance)}</strong>
@@ -1362,7 +1373,19 @@ function ProfileApp() {
         </div>
       </main>
       {nav(true)}
-      {toast && !settings && (
+      <button
+        type="button"
+        className="fab-add-button"
+        aria-label="Registrar movimiento"
+        title="Registrar movimiento"
+        onClick={() => {
+          navigator.vibrate?.(15);
+          setForm({ kind: "transaction" });
+        }}
+      >
+        <Plus size={24} strokeWidth={2.4} />
+      </button>
+      {toast && (
         <IosNotificationBanner
           key={toast}
           toast={{ message: toast }}
@@ -1466,14 +1489,6 @@ function ProfileApp() {
       )}
       {settings && (
         <Modal title="Configuración" onClose={() => setSettings(false)}>
-          {toast && (
-            <IosNotificationBanner
-              key={toast}
-              toast={{ message: toast }}
-              onClose={() => setToast("")}
-            />
-          )}
-
           <section className="profile-settings glass-surface">
             <div className="profile-settings-heading">
               <span className="profile-monogram">
@@ -2177,15 +2192,7 @@ function EntryForm({
               ) : (
                 <button
                   type="button"
-                  style={{
-                    border: "1px dashed rgba(255, 255, 255, 0.35)",
-                    background: "transparent",
-                    color: "#38bdf8",
-                    padding: "6px 12px",
-                    borderRadius: "999px",
-                    fontSize: "13px",
-                    cursor: "pointer",
-                  }}
+                  className="add-category-chip"
                   onClick={() => setAddingCat(true)}
                 >
                   + Nueva

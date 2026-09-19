@@ -44,17 +44,20 @@ service cloud.firestore {
       allow create: if owner(uid) && validProfile(request.resource.data);
       allow update: if owner(uid) && validProfile(request.resource.data)
         && request.resource.data.created == resource.data.created;
+      allow delete: if owner(uid);
       match /entries/{entryId} {
         allow read: if owner(uid);
         allow create: if owner(uid) && validEntry(request.resource.data, entryId);
         allow update: if owner(uid) && validEntry(request.resource.data, entryId)
           && request.resource.data.updated >= resource.data.updated;
+        allow delete: if owner(uid);
       }
       match /preferences/{id} {
         allow read: if owner(uid) && id == 'main';
         allow create: if owner(uid) && id == 'main' && validPreferences(request.resource.data);
         allow update: if owner(uid) && id == 'main' && validPreferences(request.resource.data)
           && request.resource.data.updated >= resource.data.updated;
+        allow delete: if owner(uid);
       }
     }
     match /clara_users/{uid}/entries/{entryId} {
