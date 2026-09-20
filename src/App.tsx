@@ -1,7 +1,7 @@
 import { DateStrip, IosNotificationBanner } from "./UIEnhancements";
 import { NotificationSettings } from "./NotificationSettings";
 import { showDeviceNotification } from "./notifications";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { BrandMark } from "./Brand";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
@@ -314,13 +314,24 @@ function ProfileApp() {
     ),
     [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   useEffect(() => subscribeToAuth(setCurrentUser), []);
-  const month = date.slice(0, 7),
-    live = entries.filter((e) => !e.deleted),
-    s = summarize(entries, month, date, prefs.budget),
-    fixed = live.filter((e) => e.kind === "fixed"),
-    debts = live.filter((e) => e.kind === "debt"),
-    accounts = live.filter((e) => e.kind === "account"),
-    accountNames = accountNameMap(live);
+  const month = date.slice(0, 7);
+  // Todo esto recorre la cartera entera. Sin memoizar se rehacía en cada tecla
+  // del buscador y en cada cambio de pestaña, aunque los datos no cambiaran.
+  const { live, fixed, debts, accounts, accountNames, transfers } = useMemo(() => {
+    const alive = entries.filter((e) => !e.deleted);
+    return {
+      live: alive,
+      fixed: alive.filter((e) => e.kind === "fixed"),
+      debts: alive.filter((e) => e.kind === "debt"),
+      accounts: alive.filter((e) => e.kind === "account"),
+      transfers: alive.filter((e) => e.kind === "transfer"),
+      accountNames: accountNameMap(alive),
+    };
+  }, [entries]);
+  const s = useMemo(
+    () => summarize(entries, month, date, prefs.budget),
+    [entries, month, date, prefs.budget],
+  );
   const fmt = (n: number) => (prefs.hidden ? "$ ••••••" : money(n));
   const notify = (message: string) => setToast(message);
   const run = async (action: () => Promise<unknown>, message?: string) => {
@@ -610,10 +621,8 @@ function ProfileApp() {
   const needle = search.trim().toLowerCase();
   // Los traspasos no son ingreso ni gasto, así que summarize los ignora, pero sí
   // son actividad de la cartera y deben verse junto al resto de movimientos.
-  const periodTransfers = live.filter(
-    (e) =>
-      e.kind === "transfer" &&
-      (tab === "Diario" ? e.date === date : e.date.startsWith(month)),
+  const periodTransfers = transfers.filter((e) =>
+    tab === "Diario" ? e.date === date : e.date.startsWith(month),
   );
   const transferLabel = (e: Entry) =>
     `${accountNames.get(e.accountId || "") || e.account} → ${

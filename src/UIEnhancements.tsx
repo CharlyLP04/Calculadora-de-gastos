@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { BrandMark } from "./Brand";
-import { daysInMonth, summarize, type Entry } from "./data";
+import { daysInMonth, summarizeDays, type Entry } from "./data";
 function playIosChime() {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -104,7 +104,7 @@ export function IosNotificationBanner({
   );
 }
 
-export function DateStrip({
+export const DateStrip = memo(function DateStrip({
   month,
   date,
   entries,
@@ -255,6 +255,12 @@ export function DateStrip({
 
   useEffect(() => () => stopMomentum(), []);
   const daysCount = daysInMonth(month);
+  // Un solo recorrido por mes, no uno por día: esto se recalculaba en cada
+  // pulsación del buscador, que vive en el estado de la pantalla completa.
+  const { allowance, byDay } = useMemo(
+    () => summarizeDays(entries, month, budget),
+    [entries, month, budget],
+  );
 
   return (
     <div
@@ -267,18 +273,19 @@ export function DateStrip({
     >
       {Array.from({ length: daysCount }, (_, i) => {
         const day = month + "-" + String(i + 1).padStart(2, "0");
-        const ds = summarize(entries, month, day, budget);
+        const ds = byDay.get(day);
+        const dayExpense = ds?.expense || 0;
         const isSelected = day === date;
         const dateFormatted = new Date(day + "T12:00:00").toLocaleDateString(
           "es-MX",
           { day: "numeric", month: "long" },
         );
-        const hasExpenses = ds.dayTx.length > 0;
-        const isOver = hasExpenses && ds.dayExpense > ds.allowance;
+        const hasExpenses = (ds?.count || 0) > 0;
+        const isOver = hasExpenses && dayExpense > allowance;
         const statusText = hasExpenses
           ? isOver
-            ? `Sobre el límite: $${Math.round(ds.dayExpense)} gastados de $${Math.round(ds.allowance)} sugeridos`
-            : `Dentro del presupuesto: $${Math.round(ds.dayExpense)} gastados`
+            ? `Sobre el límite: $${Math.round(dayExpense)} gastados de $${Math.round(allowance)} sugeridos`
+            : `Dentro del presupuesto: $${Math.round(dayExpense)} gastados`
           : "Sin gastos";
 
         return (
@@ -316,4 +323,4 @@ export function DateStrip({
       })}
     </div>
   );
-}
+});

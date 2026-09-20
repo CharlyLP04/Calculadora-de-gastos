@@ -204,6 +204,20 @@ export function summarize(
     dayTx,
   };
 }
+// El calendario necesita, por día, cuántos movimientos hubo y cuánto se gastó.
+// Llamar a summarize una vez por día recorría la cartera entera 31 veces (y con
+// ella debtRemaining por cada deuda); aquí basta un recorrido para todo el mes.
+export function summarizeDays(entries: Entry[], month: string, budget: number) {
+  const base = summarize(entries, month, month + "-01", budget);
+  const byDay = new Map<string, { expense: number; count: number }>();
+  for (const e of base.tx) {
+    const day = byDay.get(e.date) || { expense: 0, count: 0 };
+    day.count++;
+    if (e.direction !== "income") day.expense = round(day.expense + e.amount);
+    byDay.set(e.date, day);
+  }
+  return { allowance: base.allowance, byDay };
+}
 export function debtRemaining(debt: Entry, entries: Entry[]) {
   return round(
     Math.max(
