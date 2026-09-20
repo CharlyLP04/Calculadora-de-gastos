@@ -6,6 +6,8 @@ import {
   summarize,
   money,
   debtRemaining,
+  accountLabel,
+  accountNameMap,
 } from "./data";
 export function download(data: BlobPart, name: string, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type }));
@@ -40,11 +42,12 @@ export async function exportReport(
     return;
   }
   const s = summarize(entries, month, month + "-01", prefs.budget);
+  const names = accountNameMap(entries);
   const rows = s.tx.map((e) => ({
     Fecha: e.date,
     Concepto: safe(e.title),
     Categoría: safe(e.category),
-    Cuenta: safe(e.account),
+    Cuenta: safe(accountLabel(e, names)),
     Tipo: e.direction === "income" ? "Ingreso" : "Gasto",
     Monto: e.amount,
   }));

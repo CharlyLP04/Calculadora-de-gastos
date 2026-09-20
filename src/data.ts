@@ -16,6 +16,10 @@ export interface Entry {
   total?: number;
   initialPaid?: number;
   monthly?: number;
+  // Identidad estable de la cuenta. `account` guarda el nombre y sigue siendo el
+  // único dato en registros anteriores o escritos por versiones viejas, así que
+  // todo lo que reparte dinero acepta ambos (ver matchesAccount).
+  accountId?: string;
 }
 export interface Prefs {
   id: string;
@@ -38,7 +42,57 @@ export class Database extends Dexie {
   constructor(profileId = sessionProfileId || "unselected") {
     super(profileDatabaseName(profileId));
     this.version(1).stores({ entries: "id,kind,date,updated", prefs: "id" });
+    // Rellena accountId a partir del nombre de cuenta ya guardado. No toca
+    // `updated` a propósito: es un dato derivado que cada dispositivo puede
+    // recalcular, y tocarlo volvería a subir toda la cartera a Firestore.
+    this.version(2)
+      .stores({ entries: "id,kind,date,updated", prefs: "id" })
+      .upgrade(async (tx) => {
+        const table = tx.table<Entry, string>("entries");
+        const all = await table.toArray();
+        const idByTitle = new Map<string, string>();
+        for (const e of all)
+          if (e.kind === "account" && !e.deleted) idByTitle.set(e.title, e.id);
+        const pending = all.filter(
+          (e) => !e.accountId && e.account && idByTitle.has(e.account),
+        );
+        if (pending.length)
+          await table.bulkPut(
+            pending.map((e) => ({ ...e, accountId: idByTitle.get(e.account) })),
+          );
+      });
   }
+}
+// Un registro pertenece a una cuenta por identidad cuando la tiene; si no, por
+// nombre, que es lo único que traen los registros anteriores a accountId.
+export const matchesAccount = (entry: Entry, account: Entry) =>
+  entry.accountId
+    ? entry.accountId === account.id
+    : entry.account === account.title;
+
+// Nombre a mostrar: el actual de la cuenta vinculada, no la copia guardada en el
+// registro, que queda obsoleta cuando se renombra la cuenta.
+export const accountNameMap = (entries: Entry[]) =>
+  new Map(
+    entries
+      .filter((e) => e.kind === "account" && !e.deleted)
+      .map((e) => [e.id, e.title] as const),
+  );
+export const accountLabel = (entry: Entry, names: Map<string, string>) =>
+  (entry.accountId && names.get(entry.accountId)) || entry.account;
+
+export function accountBalance(account: Entry, entries: Entry[]) {
+  return round(
+    entries
+      .filter((e) => !e.deleted && e.kind === "transaction")
+      .reduce(
+        (total, e) =>
+          matchesAccount(e, account)
+            ? total + (e.direction === "income" ? e.amount : -e.amount)
+            : total,
+        account.amount,
+      ),
+  );
 }
 export const db = new Database();
 export const defaultCategories = [
@@ -210,6 +264,10 @@ export function validEntries(value: unknown): value is Entry[] {
       (e.direction === undefined ||
         ["income", "expense"].includes(e.direction)) &&
       (e.deleted === undefined || typeof e.deleted === "boolean") &&
+      (e.accountId === undefined ||
+        (typeof e.accountId === "string" &&
+          e.accountId.length > 0 &&
+          e.accountId.length <= 200)) &&
       ["total", "initialPaid", "monthly"].every(
         (k) =>
           e[k] === undefined ||

@@ -60,6 +60,10 @@ import {
   getCategories,
   summarize,
   debtRemaining,
+  matchesAccount,
+  accountBalance,
+  accountLabel,
+  accountNameMap,
   saveEntry,
   removeEntry,
   wipeAllData,
@@ -313,7 +317,8 @@ function ProfileApp() {
     s = summarize(entries, month, date, prefs.budget),
     fixed = live.filter((e) => e.kind === "fixed"),
     debts = live.filter((e) => e.kind === "debt"),
-    accounts = live.filter((e) => e.kind === "account");
+    accounts = live.filter((e) => e.kind === "account"),
+    accountNames = accountNameMap(live);
   const fmt = (n: number) => (prefs.hidden ? "$ ••••••" : money(n));
   const notify = (message: string) => setToast(message);
   const run = async (action: () => Promise<unknown>, message?: string) => {
@@ -579,20 +584,38 @@ function ProfileApp() {
   const changeMonth = (value: string) => {
     if (/^\d{4}-\d{2}$/.test(value)) setDate(value + "-01");
   };
+  const needle = search.trim().toLowerCase();
   const transactions = (tab === "Diario" ? s.dayTx : s.tx)
-    .filter((e) =>
-      `${e.title} ${e.category} ${e.account}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
+    .filter(
+      (e) =>
+        !needle ||
+        `${e.title} ${e.category} ${accountLabel(e, accountNames)}`
+          .toLowerCase()
+          .includes(needle),
     )
     .sort((a, b) => b.date.localeCompare(a.date) || b.updated - a.updated);
+  const describeDeletion = (e: Entry) => {
+    if (e.kind === "debt")
+      return "Esta deuda se eliminará de los compromisos activos. Los pagos y abonos realizados se conservarán en tu historial.";
+    if (e.kind === "fixed")
+      return `Se eliminará este compromiso de ${money(e.amount)} al mes. Los pagos que ya registraste se conservan.`;
+    if (e.kind === "account") {
+      const linked = live.filter(
+        (t) => t.kind === "transaction" && matchesAccount(t, e),
+      ).length;
+      return linked
+        ? `Sus ${linked} movimiento(s) se conservan en tu historial y siguen contando en ingresos y gastos, pero dejarán de sumar a un saldo de cuenta. El saldo inicial de ${money(e.amount)} se pierde.`
+        : `Se eliminará esta cuenta y su saldo inicial de ${money(e.amount)}.`;
+    }
+    return `Se eliminará este movimiento de ${money(e.amount)} de tu contabilidad y balances.`;
+  };
   const deleteItem = (e: Entry) => {
     setConfirmState({
-      title: `¿Eliminar “${e.title}”?`,
-      message:
-        e.kind === "debt"
-          ? "Esta deuda se eliminará de los compromisos activos. Los pagos y abonos realizados se conservarán en tu historial."
-          : `Se eliminará este movimiento de ${money(e.amount)} de tu contabilidad y balances.`,
+      title:
+        e.kind === "account"
+          ? `¿Eliminar la cuenta “${e.title}”?`
+          : `¿Eliminar “${e.title}”?`,
+      message: describeDeletion(e),
       confirmLabel: "Eliminar",
       isDestructive: true,
       onConfirm: () => {
@@ -620,7 +643,8 @@ function ProfileApp() {
             >
               <strong>{e.title}</strong>
               <span>
-                {e.category} <i>·</i> {e.account || "Sin cuenta"} <i>·</i>{" "}
+                {e.category} <i>·</i> {accountLabel(e, accountNames) || "Sin cuenta"}{" "}
+                <i>·</i>{" "}
                 {e.date.slice(8)}/{e.date.slice(5, 7)}
               </span>
             </button>
@@ -966,23 +990,8 @@ function ProfileApp() {
                     </div>
                     <div className="account-grid">
                       {accounts.length ? (
-                        accounts.map((a, i) => {
-                          const balance =
-                            a.amount +
-                            live
-                              .filter(
-                                (t) =>
-                                  t.kind === "transaction" &&
-                                  t.account === a.title,
-                              )
-                              .reduce(
-                                (v, t) =>
-                                  v +
-                                  (t.direction === "income"
-                                    ? t.amount
-                                    : -t.amount),
-                                0,
-                              );
+                        accounts.map((a) => {
+                          const balance = accountBalance(a, live);
                           return (
                             <button
                               className="account"
@@ -1976,6 +1985,11 @@ function EntryForm({
     [addingCat, setAddingCat] = useState(false),
     [newCatName, setNewCatName] = useState(""),
     [errorMessage, setErrorMessage] = useState("");
+  // El nombre guardado en el registro puede ser el que tenía la cuenta antes de
+  // renombrarla; la lista de opciones muestra los nombres actuales.
+  const currentAccountName = entry
+    ? accountLabel(entry, accountNameMap(accounts))
+    : "";
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (saving) return;
@@ -2031,6 +2045,8 @@ function EntryForm({
         )
       )
         throw new Error("Ya existe una cuenta con ese nombre.");
+      const accountName = String(f.get("account") || "");
+      const chosenAccount = accounts.find((a) => a.title === accountName);
       await db.transaction("rw", db.entries, async () => {
         await saveEntry({
           id: entry?.id,
@@ -2039,7 +2055,11 @@ function EntryForm({
           amount: kind === "debt" ? 0 : round(value),
           date: String(f.get("date") || date),
           category,
-          account: String(f.get("account") || ""),
+          account: accountName,
+          accountId:
+            kind === "transaction"
+              ? chosenAccount?.id || entry?.accountId
+              : undefined,
           direction,
           debtId: debt?.id || entry?.debtId,
           total: kind === "debt" ? total : undefined,
@@ -2047,10 +2067,22 @@ function EntryForm({
           monthly: kind === "debt" ? monthly : undefined,
         });
         if (kind === "account" && entry && entry.title !== title) {
+          // Los registros que ya apuntan a esta cuenta por identidad no
+          // necesitan tocarse; solo los anteriores a accountId, que la
+          // reconocen por nombre. De paso se les fija el identificador.
+          const now = Date.now();
           for (const t of entries.filter(
-            (t) => t.kind === "transaction" && t.account === entry.title,
+            (t) =>
+              t.kind === "transaction" &&
+              !t.accountId &&
+              t.account === entry.title,
           ))
-            await db.entries.put({ ...t, account: title, updated: Date.now() });
+            await db.entries.put({
+              ...t,
+              account: title,
+              accountId: entry.id,
+              updated: now,
+            });
         }
       });
       onSave();
@@ -2263,13 +2295,15 @@ function EntryForm({
             Cuenta
             <select
               name="account"
-              defaultValue={entry?.account || accounts[0]?.title || "Efectivo"}
+              defaultValue={
+                currentAccountName || accounts[0]?.title || "Efectivo"
+              }
             >
               {[
                 ...new Set([
                   ...accounts.map((a) => a.title),
                   "Efectivo",
-                  ...(entry?.account ? [entry.account] : []),
+                  ...(currentAccountName ? [currentAccountName] : []),
                 ]),
               ].map((a) => (
                 <option key={a}>{a}</option>
