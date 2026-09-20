@@ -647,6 +647,61 @@ main {
   background: #18332f;
   border-color: #295048;
 }
+.category-icon.transfer {
+  color: #8fb4ff;
+  background: #1b2643;
+  border-color: #33477a;
+}
+/* Un traspaso no suma ni resta a la cartera: no lleva color de ingreso ni de
+   gasto, para que no se lea como uno de los dos. */
+.neutral {
+  color: #a6b9dc !important;
+}
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.transfer-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin: 4px 0 2px;
+  border: 1px solid #34425b;
+  border-radius: 14px;
+  background: #202b41;
+  color: #a6b9dc;
+  font-size: 0.86rem;
+}
+.transfer-preview > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.transfer-preview > span > span {
+  color: #e8eefc;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-preview svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+@media (max-width: 460px) {
+  /* Apilado: la flecha apunta hacia abajo para que se lea origen → destino. */
+  .transfer-preview {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .transfer-preview svg {
+    transform: rotate(90deg);
+    align-self: center;
+  }
+}
 .transaction-label {
   min-width: 0;
   flex: 1;

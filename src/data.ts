@@ -1,6 +1,9 @@
 import Dexie, { type Table } from "dexie";
 import { profileDatabaseName, sessionProfileId } from "./profiles";
-export type Kind = "transaction" | "fixed" | "debt" | "account";
+export type Kind = "transaction" | "fixed" | "debt" | "account" | "transfer";
+// Un traspaso mueve dinero entre dos cuentas propias: no es ingreso ni gasto y
+// queda fuera de `summarize`, que solo mira kind === "transaction".
+export const TRANSFER_CATEGORY = "Traspaso";
 export interface Entry {
   id: string;
   kind: Kind;
@@ -20,6 +23,9 @@ export interface Entry {
   // único dato en registros anteriores o escritos por versiones viejas, así que
   // todo lo que reparte dinero acepta ambos (ver matchesAccount).
   accountId?: string;
+  // Cuenta de destino de un traspaso. Los traspasos nacen después de accountId,
+  // así que siempre referencian por identificador, nunca por nombre.
+  toAccountId?: string;
 }
 export interface Prefs {
   id: string;
@@ -83,15 +89,16 @@ export const accountLabel = (entry: Entry, names: Map<string, string>) =>
 
 export function accountBalance(account: Entry, entries: Entry[]) {
   return round(
-    entries
-      .filter((e) => !e.deleted && e.kind === "transaction")
-      .reduce(
-        (total, e) =>
-          matchesAccount(e, account)
-            ? total + (e.direction === "income" ? e.amount : -e.amount)
-            : total,
-        account.amount,
-      ),
+    entries.reduce((total, e) => {
+      if (e.deleted) return total;
+      if (e.kind === "transaction" && matchesAccount(e, account))
+        return total + (e.direction === "income" ? e.amount : -e.amount);
+      if (e.kind === "transfer") {
+        if (e.accountId === account.id) return total - e.amount;
+        if (e.toAccountId === account.id) return total + e.amount;
+      }
+      return total;
+    }, account.amount),
   );
 }
 export const db = new Database();
@@ -229,6 +236,48 @@ export async function saveEntry(
 export async function removeEntry(entry: Entry) {
   await db.entries.put({ ...entry, deleted: true, updated: Date.now() });
 }
+export interface TransferInput {
+  id?: string;
+  amount: number;
+  date: string;
+  fromId: string;
+  toId: string;
+  title?: string;
+}
+export async function saveTransfer(input: TransferInput) {
+  const amount = round(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0)
+    throw new Error("Ingresa un monto mayor a cero.");
+  if (!input.fromId || !input.toId)
+    throw new Error("Elige la cuenta de origen y la de destino.");
+  if (input.fromId === input.toId)
+    throw new Error("Elige dos cuentas distintas.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date))
+    throw new Error("Revisa la fecha del traspaso.");
+  // Las cuentas se releen aquí dentro: la lista que vio el formulario pudo
+  // quedarse vieja si otro dispositivo borró una mientras se llenaba.
+  await db.transaction("rw", db.entries, async () => {
+    const [from, to] = await Promise.all([
+      db.entries.get(input.fromId),
+      db.entries.get(input.toId),
+    ]);
+    const usable = (a?: Entry) => a && a.kind === "account" && !a.deleted;
+    if (!usable(from) || !usable(to))
+      throw new Error("Alguna de las cuentas ya no está disponible.");
+    await db.entries.put({
+      id: input.id || crypto.randomUUID(),
+      kind: "transfer",
+      title: (input.title || "").trim() || `${from!.title} → ${to!.title}`,
+      amount,
+      date: input.date,
+      category: TRANSFER_CATEGORY,
+      account: from!.title,
+      accountId: from!.id,
+      toAccountId: to!.id,
+      updated: Date.now(),
+    });
+  });
+}
 export function validEntries(value: unknown): value is Entry[] {
   if (!Array.isArray(value) || value.length > 100000) return false;
   const ids = new Set<string>();
@@ -244,7 +293,7 @@ export function validEntries(value: unknown): value is Entry[] {
       return false;
     ids.add(e.id);
     return (
-      ["transaction", "fixed", "debt", "account"].includes(e.kind) &&
+      ["transaction", "fixed", "debt", "account", "transfer"].includes(e.kind) &&
       typeof e.title === "string" &&
       e.title.length <= 200 &&
       typeof e.amount === "number" &&
@@ -264,10 +313,18 @@ export function validEntries(value: unknown): value is Entry[] {
       (e.direction === undefined ||
         ["income", "expense"].includes(e.direction)) &&
       (e.deleted === undefined || typeof e.deleted === "boolean") &&
-      (e.accountId === undefined ||
+      ["accountId", "toAccountId"].every(
+        (k) =>
+          e[k] === undefined ||
+          (typeof e[k] === "string" && e[k].length > 0 && e[k].length <= 200),
+      ) &&
+      // Un traspaso sin las dos cuentas, o con la misma dos veces, movería
+      // dinero a ninguna parte o a sí mismo.
+      (e.kind !== "transfer" ||
         (typeof e.accountId === "string" &&
-          e.accountId.length > 0 &&
-          e.accountId.length <= 200)) &&
+          typeof e.toAccountId === "string" &&
+          e.accountId !== e.toAccountId &&
+          e.amount > 0)) &&
       ["total", "initialPaid", "monthly"].every(
         (k) =>
           e[k] === undefined ||

@@ -132,3 +132,28 @@ test("profile revision only moves forward and cannot be reset by an old client",
   await assertFails(setDoc(profile, { ...base, rev: "3" }));
   await assertFails(setDoc(profile, { ...base, rev: 3, created: 200 }));
 });
+test("a transfer needs two different accounts and a positive amount", async () => {
+  const db = env.authenticatedContext("ana", claims).firestore();
+  const transfer = {
+    id: "move",
+    kind: "transfer",
+    title: "Efectivo → Débito",
+    amount: 500,
+    date: "2026-09-15",
+    category: "Traspaso",
+    account: "Efectivo",
+    accountId: "acc-cash",
+    toAccountId: "acc-bank",
+    updated: 100,
+  };
+  const target = doc(db, root, "entries", "move");
+  await assertFails(setDoc(target, { ...transfer, toAccountId: "acc-cash" }));
+  await assertFails(setDoc(target, { ...transfer, toAccountId: undefined }));
+  await assertFails(setDoc(target, { ...transfer, accountId: undefined }));
+  await assertFails(setDoc(target, { ...transfer, accountId: "" }));
+  await assertFails(setDoc(target, { ...transfer, amount: 0 }));
+  await assertSucceeds(setDoc(target, transfer));
+  await assertSucceeds(
+    updateDoc(target, { deleted: true, updated: 101 }),
+  );
+});

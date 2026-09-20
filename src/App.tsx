@@ -8,6 +8,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   ArrowRight,
+  ArrowLeftRight,
   Wallet,
   LayoutDashboard,
   CalendarDays,
@@ -65,6 +66,7 @@ import {
   accountLabel,
   accountNameMap,
   saveEntry,
+  saveTransfer,
   removeEntry,
   wipeAllData,
   setSyncBlocked,
@@ -585,11 +587,29 @@ function ProfileApp() {
     if (/^\d{4}-\d{2}$/.test(value)) setDate(value + "-01");
   };
   const needle = search.trim().toLowerCase();
-  const transactions = (tab === "Diario" ? s.dayTx : s.tx)
+  // Los traspasos no son ingreso ni gasto, así que summarize los ignora, pero sí
+  // son actividad de la cartera y deben verse junto al resto de movimientos.
+  const periodTransfers = live.filter(
+    (e) =>
+      e.kind === "transfer" &&
+      (tab === "Diario" ? e.date === date : e.date.startsWith(month)),
+  );
+  const transferLabel = (e: Entry) =>
+    `${accountNames.get(e.accountId || "") || e.account} → ${
+      accountNames.get(e.toAccountId || "") || "cuenta eliminada"
+    }`;
+  const transactions = [
+    ...(tab === "Diario" ? s.dayTx : s.tx),
+    ...periodTransfers,
+  ]
     .filter(
       (e) =>
         !needle ||
-        `${e.title} ${e.category} ${accountLabel(e, accountNames)}`
+        `${e.title} ${e.category} ${
+          e.kind === "transfer"
+            ? transferLabel(e)
+            : accountLabel(e, accountNames)
+        }`
           .toLowerCase()
           .includes(needle),
     )
@@ -599,9 +619,14 @@ function ProfileApp() {
       return "Esta deuda se eliminará de los compromisos activos. Los pagos y abonos realizados se conservarán en tu historial.";
     if (e.kind === "fixed")
       return `Se eliminará este compromiso de ${money(e.amount)} al mes. Los pagos que ya registraste se conservan.`;
+    if (e.kind === "transfer")
+      return `Se deshará este traspaso de ${money(e.amount)}: el dinero vuelve a la cuenta de origen.`;
     if (e.kind === "account") {
       const linked = live.filter(
-        (t) => t.kind === "transaction" && matchesAccount(t, e),
+        (t) =>
+          (t.kind === "transaction" && matchesAccount(t, e)) ||
+          (t.kind === "transfer" &&
+            (t.accountId === e.id || t.toAccountId === e.id)),
       ).length;
       return linked
         ? `Sus ${linked} movimiento(s) se conservan en tu historial y siguen contando en ingresos y gastos, pero dejarán de sumar a un saldo de cuenta. El saldo inicial de ${money(e.amount)} se pierde.`
@@ -629,9 +654,17 @@ function ProfileApp() {
         {list.map((e) => (
           <div className="transaction" key={e.id}>
             <div
-              className={`category-icon ${e.direction === "income" ? "income" : ""}`}
+              className={`category-icon ${
+                e.kind === "transfer"
+                  ? "transfer"
+                  : e.direction === "income"
+                    ? "income"
+                    : ""
+              }`}
             >
-              {e.direction === "income" ? (
+              {e.kind === "transfer" ? (
+                <ArrowLeftRight size={20} />
+              ) : e.direction === "income" ? (
                 <ArrowDownLeft size={20} />
               ) : (
                 <CategoryIcon category={e.category} />
@@ -639,17 +672,27 @@ function ProfileApp() {
             </div>
             <button
               className="transaction-label"
-              onClick={() => setForm({ kind: "transaction", entry: e })}
+              onClick={() => setForm({ kind: e.kind, entry: e })}
             >
               <strong>{e.title}</strong>
               <span>
-                {e.category} <i>·</i> {accountLabel(e, accountNames) || "Sin cuenta"}{" "}
-                <i>·</i>{" "}
-                {e.date.slice(8)}/{e.date.slice(5, 7)}
+                {e.category} <i>·</i>{" "}
+                {e.kind === "transfer"
+                  ? transferLabel(e)
+                  : accountLabel(e, accountNames) || "Sin cuenta"}{" "}
+                <i>·</i> {e.date.slice(8)}/{e.date.slice(5, 7)}
               </span>
             </button>
-            <strong className={e.direction === "income" ? "positive" : ""}>
-              {e.direction === "income" ? "+" : "−"}
+            <strong
+              className={
+                e.kind === "transfer"
+                  ? "neutral"
+                  : e.direction === "income"
+                    ? "positive"
+                    : ""
+              }
+            >
+              {e.kind === "transfer" ? "" : e.direction === "income" ? "+" : "−"}
               {fmt(e.amount)}
             </strong>
             <button
@@ -981,12 +1024,22 @@ function ProfileApp() {
                   <section className="card accounts-card">
                     <div className="section-row">
                       <h2>Tus cuentas</h2>
-                      <button
-                        className="text-button"
-                        onClick={() => setForm({ kind: "account" })}
-                      >
-                        <Plus size={16} /> Cuenta
-                      </button>
+                      <div className="section-actions">
+                        {accounts.length > 1 && (
+                          <button
+                            className="text-button"
+                            onClick={() => setForm({ kind: "transfer" })}
+                          >
+                            <ArrowLeftRight size={16} /> Transferir
+                          </button>
+                        )}
+                        <button
+                          className="text-button"
+                          onClick={() => setForm({ kind: "account" })}
+                        >
+                          <Plus size={16} /> Cuenta
+                        </button>
+                      </div>
                     </div>
                     <div className="account-grid">
                       {accounts.length ? (
@@ -1461,7 +1514,9 @@ function ProfileApp() {
         <Modal
           title={
             form.entry
-              ? "Editar registro"
+              ? form.kind === "transfer"
+                ? "Editar traspaso"
+                : "Editar registro"
               : form.debt
                 ? `Abonar a ${form.debt.title}`
                 : {
@@ -1469,26 +1524,43 @@ function ProfileApp() {
                     fixed: "Nuevo gasto fijo",
                     debt: "Nueva deuda",
                     account: "Nueva cuenta",
+                    transfer: "Mover dinero entre cuentas",
                   }[form.kind]
           }
           onClose={() => setForm(null)}
         >
-          <EntryForm
-            kind={form.kind}
-            entry={form.entry}
-            debt={form.debt}
-            accounts={accounts}
-            date={date}
-            entries={live}
-            categories={availableCategories}
-            onAddCategory={handleAddCategory}
-            onSave={() => {
-              setForm(null);
-              notify("Guardado en este dispositivo");
-              navigator.vibrate?.(30);
-            }}
-            onError={notify}
-          />
+          {form.kind === "transfer" ? (
+            <TransferForm
+              entry={form.entry}
+              accounts={accounts}
+              entries={live}
+              date={date}
+              hidden={prefs.hidden}
+              onSave={() => {
+                setForm(null);
+                notify("Traspaso guardado en este dispositivo");
+                navigator.vibrate?.(30);
+              }}
+              onError={notify}
+            />
+          ) : (
+            <EntryForm
+              kind={form.kind}
+              entry={form.entry}
+              debt={form.debt}
+              accounts={accounts}
+              date={date}
+              entries={live}
+              categories={availableCategories}
+              onAddCategory={handleAddCategory}
+              onSave={() => {
+                setForm(null);
+                notify("Guardado en este dispositivo");
+                navigator.vibrate?.(30);
+              }}
+              onError={notify}
+            />
+          )}
           {form.entry && (
             <button
               className="danger-button"
@@ -1497,7 +1569,9 @@ function ProfileApp() {
                 setForm(null);
               }}
             >
-              Eliminar registro
+              {form.kind === "transfer"
+                ? "Eliminar traspaso"
+                : "Eliminar registro"}
             </button>
           )}
         </Modal>
@@ -1949,6 +2023,163 @@ function ProfileApp() {
         />
       )}
     </div>
+  );
+}
+function TransferForm({
+  entry,
+  accounts,
+  entries,
+  date,
+  hidden,
+  onSave,
+  onError,
+}: {
+  entry?: Entry;
+  accounts: Entry[];
+  entries: Entry[];
+  date: string;
+  hidden: boolean;
+  onSave: () => void;
+  onError: (s: string) => void;
+}) {
+  const [amount, setAmount] = useState(entry ? String(entry.amount) : ""),
+    [fromId, setFromId] = useState(entry?.accountId || accounts[0]?.id || ""),
+    [toId, setToId] = useState(
+      entry?.toAccountId ||
+        accounts.find((a) => a.id !== (entry?.accountId || accounts[0]?.id))
+          ?.id ||
+        "",
+    ),
+    [saving, setSaving] = useState(false),
+    [errorMessage, setErrorMessage] = useState("");
+  const value = Number(amount) || 0;
+  // Al editar, el traspaso que se está cambiando ya está aplicado en los saldos:
+  // hay que sacarlo antes de simular, o se contaría dos veces.
+  const baseline = entry ? entries.filter((e) => e.id !== entry.id) : entries;
+  const preview = (account: Entry | undefined, delta: number) => {
+    if (!account) return null;
+    const current = accountBalance(account, baseline);
+    const next = round(current + delta);
+    return (
+      <span className={next < 0 ? "negative" : ""}>
+        {hidden ? "$ ••••••" : `${money(current)} → ${money(next)}`}
+      </span>
+    );
+  };
+  const from = accounts.find((a) => a.id === fromId);
+  const to = accounts.find((a) => a.id === toId);
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    try {
+      const form = new FormData(e.currentTarget);
+      await saveTransfer({
+        id: entry?.id,
+        amount: value,
+        date: String(form.get("date") || date),
+        fromId,
+        toId,
+        title: String(form.get("title") || ""),
+      });
+      onSave();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo guardar.";
+      setErrorMessage(message);
+      onError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const options = (exclude: string) =>
+    accounts
+      .filter((a) => a.id !== exclude)
+      .map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.title}
+        </option>
+      ));
+  return (
+    <form onSubmit={submit} className="entry-form">
+      <p className="muted">
+        Un traspaso mueve dinero entre tus cuentas. No cuenta como ingreso ni
+        como gasto del mes.
+      </p>
+      <label className="amount-input">
+        <span>Monto · MXN</span>
+        <div>
+          <span>$</span>
+          <input
+            aria-label="Monto"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            required
+          />
+        </div>
+      </label>
+      <div className="form-grid">
+        <label>
+          Desde
+          <select
+            value={fromId}
+            onChange={(e) => {
+              setFromId(e.target.value);
+              if (e.target.value === toId)
+                setToId(accounts.find((a) => a.id !== e.target.value)?.id || "");
+            }}
+          >
+            {options(toId)}
+          </select>
+        </label>
+        <label>
+          Hacia
+          <select value={toId} onChange={(e) => setToId(e.target.value)}>
+            {options(fromId)}
+          </select>
+        </label>
+      </div>
+      <div className="transfer-preview">
+        <span>
+          {from?.title} {preview(from, -value)}
+        </span>
+        <ArrowRight size={16} aria-hidden="true" />
+        <span>
+          {to?.title} {preview(to, value)}
+        </span>
+      </div>
+      <div className="form-grid">
+        <label>
+          Concepto (opcional)
+          <input
+            name="title"
+            maxLength={200}
+            defaultValue={entry?.title}
+            placeholder={
+              from && to ? `${from.title} → ${to.title}` : "Traspaso"
+            }
+          />
+        </label>
+        <label>
+          Fecha
+          <input
+            name="date"
+            type="date"
+            defaultValue={entry?.date || date}
+            required
+          />
+        </label>
+      </div>
+      <p className="form-error" role="alert">
+        {errorMessage}
+      </p>
+      <button className="primary full save-button" disabled={saving}>
+        <Check size={18} />
+        {saving ? "Guardando…" : "Guardar traspaso"}
+      </button>
+    </form>
   );
 }
 function EntryForm({

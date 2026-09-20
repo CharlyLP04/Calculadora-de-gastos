@@ -93,6 +93,28 @@ export async function exportReport(
       XLSX.utils.json_to_sheet(rows),
       "Movimientos",
     );
+    // Los traspasos van aparte: mueven dinero entre cuentas propias y sumarlos a
+    // los movimientos del mes inflaría ingresos y gastos por igual.
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(
+        entries
+          .filter(
+            (e) =>
+              !e.deleted &&
+              e.kind === "transfer" &&
+              e.date.startsWith(month),
+          )
+          .map((e) => ({
+            Fecha: e.date,
+            Concepto: safe(e.title),
+            Desde: safe(names.get(e.accountId || "") || e.account),
+            Hacia: safe(names.get(e.toAccountId || "") || "Cuenta eliminada"),
+            Monto: e.amount,
+          })),
+      ),
+      "Traspasos",
+    );
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.json_to_sheet(

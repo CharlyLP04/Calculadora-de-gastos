@@ -11,6 +11,9 @@ vi.mock("firebase/app", () => ({
   getApps: () => [{}],
   initializeApp: () => ({}),
 }));
+// auth.ts solo necesita la app de Firebase. Sin este mock, cada resetModules
+// reevaluaría ./firebase -> ./data y abriría una base Dexie de verdad.
+vi.mock("./firebase", () => ({ getFirebaseApp: () => ({}) }));
 vi.mock("firebase/auth", () => ({
   getAuth: () => ({ currentUser: null }),
   GoogleAuthProvider: class {
