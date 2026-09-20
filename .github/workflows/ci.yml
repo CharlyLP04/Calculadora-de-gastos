@@ -16,6 +16,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run format:check
       - run: npm test
       - uses: actions/setup-java@v4
         with:
@@ -28,4 +29,3 @@ jobs:
         with:
           name: clara-dist
           path: dist
-
