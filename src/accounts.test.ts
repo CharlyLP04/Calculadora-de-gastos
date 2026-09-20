@@ -71,13 +71,16 @@ describe("Identidad de cuentas", () => {
 
   it("muestra el nombre actual de la cuenta, no la copia guardada", () => {
     const names = accountNameMap([{ ...cash, title: "Efectivo MXN" }]);
-    expect(accountLabel(tx({ accountId: "acc-cash", account: "Efectivo" }), names)).toBe(
-      "Efectivo MXN",
-    );
+    expect(
+      accountLabel(tx({ accountId: "acc-cash", account: "Efectivo" }), names),
+    ).toBe("Efectivo MXN");
     expect(accountLabel(tx({ account: "Tarjeta" }), names)).toBe("Tarjeta");
     // Una cuenta borrada ya no aporta nombre: queda el guardado en el registro.
     expect(
-      accountLabel(tx({ accountId: "acc-ida", account: "Cuenta vieja" }), names),
+      accountLabel(
+        tx({ accountId: "acc-ida", account: "Cuenta vieja" }),
+        names,
+      ),
     ).toBe("Cuenta vieja");
   });
 
@@ -87,13 +90,15 @@ describe("Identidad de cuentas", () => {
     const legacy = new Dexie("clara-profile-accounts-test");
     legacy.version(1).stores({ entries: "id,kind,date,updated", prefs: "id" });
     await legacy.open();
-    await legacy.table("entries").bulkPut([
-      cash,
-      { ...cash, id: "acc-bank", title: "Débito", amount: 0 },
-      tx({ id: "old", account: "Efectivo", updated: 111 }),
-      tx({ id: "bank", account: "Débito", updated: 222 }),
-      tx({ id: "suelto", account: "Cuenta que ya no existe", updated: 333 }),
-    ]);
+    await legacy
+      .table("entries")
+      .bulkPut([
+        cash,
+        { ...cash, id: "acc-bank", title: "Débito", amount: 0 },
+        tx({ id: "old", account: "Efectivo", updated: 111 }),
+        tx({ id: "bank", account: "Débito", updated: 222 }),
+        tx({ id: "suelto", account: "Cuenta que ya no existe", updated: 333 }),
+      ]);
     legacy.close();
 
     await db.open();

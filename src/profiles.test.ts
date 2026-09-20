@@ -134,4 +134,3 @@ describe("perfiles locales", () => {
     await expect(deleteProfile("non-existent")).rejects.toThrow();
   });
 });
-

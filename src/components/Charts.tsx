@@ -28,13 +28,20 @@ interface DonutChartProps {
   totalExpense: number;
 }
 
-export const CategoryDonutChart: React.FC<DonutChartProps> = ({ data, totalExpense }) => {
-  const [selectedCategory, setSelectedCategory] = useState<CategoryData | null>(null);
+export const CategoryDonutChart: React.FC<DonutChartProps> = ({
+  data,
+  totalExpense,
+}) => {
+  const [selectedCategory, setSelectedCategory] = useState<CategoryData | null>(
+    null,
+  );
 
   if (!totalExpense || data.length === 0) {
     return (
       <div className="chart-empty-state">
-        <p className="empty">Tus categorías y gráfica aparecerán al registrar tu primer gasto.</p>
+        <p className="empty">
+          Tus categorías y gráfica aparecerán al registrar tu primer gasto.
+        </p>
       </div>
     );
   }
@@ -78,7 +85,10 @@ export const CategoryDonutChart: React.FC<DonutChartProps> = ({ data, totalExpen
           />
           {categories.map((item) => {
             const strokeDasharray = `${(item.percentage / 100) * circumference} ${circumference}`;
-            const strokeDashoffset = -((cumulativePercentage / 100) * circumference);
+            const strokeDashoffset = -(
+              (cumulativePercentage / 100) *
+              circumference
+            );
             cumulativePercentage += item.percentage;
             const isSelected = selectedCategory?.category === item.category;
 
@@ -97,12 +107,12 @@ export const CategoryDonutChart: React.FC<DonutChartProps> = ({ data, totalExpen
                 style={{
                   cursor: "pointer",
                   transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
-                  filter: isSelected ? `drop-shadow(0 0 8px ${item.color}80)` : "none",
+                  filter: isSelected
+                    ? `drop-shadow(0 0 8px ${item.color}80)`
+                    : "none",
                   opacity: selectedCategory && !isSelected ? 0.45 : 1,
                 }}
-                onClick={() =>
-                  setSelectedCategory(isSelected ? null : item)
-                }
+                onClick={() => setSelectedCategory(isSelected ? null : item)}
               />
             );
           })}
@@ -114,7 +124,14 @@ export const CategoryDonutChart: React.FC<DonutChartProps> = ({ data, totalExpen
           onClick={() => setSelectedCategory(null)}
           style={{ cursor: selectedCategory ? "pointer" : "default" }}
         >
-          <span className="donut-center-label" style={{ color: selectedCategory ? displayItem.color : "var(--muted, #94a3b8)" }}>
+          <span
+            className="donut-center-label"
+            style={{
+              color: selectedCategory
+                ? displayItem.color
+                : "var(--muted, #94a3b8)",
+            }}
+          >
             {displayItem.category}
           </span>
           <strong className="donut-center-amount">
@@ -139,7 +156,9 @@ export const CategoryDonutChart: React.FC<DonutChartProps> = ({ data, totalExpen
               onClick={() => setSelectedCategory(isSelected ? null : item)}
               style={{
                 cursor: "pointer",
-                background: isSelected ? "rgba(255, 255, 255, 0.08)" : "transparent",
+                background: isSelected
+                  ? "rgba(255, 255, 255, 0.08)"
+                  : "transparent",
                 borderRadius: "12px",
                 padding: "8px 12px",
                 transition: "all 0.2s ease",
@@ -157,7 +176,9 @@ export const CategoryDonutChart: React.FC<DonutChartProps> = ({ data, totalExpen
                   <span className="legend-name">{item.category}</span>
                 </div>
                 <div className="legend-amount-group">
-                  <strong className="legend-amount">{money(item.amount)}</strong>
+                  <strong className="legend-amount">
+                    {money(item.amount)}
+                  </strong>
                   <span className="legend-pct">{item.percentage}%</span>
                 </div>
               </div>
@@ -184,7 +205,10 @@ interface IncomeExpenseFlowProps {
   expense: number;
 }
 
-export const IncomeExpenseFlow: React.FC<IncomeExpenseFlowProps> = ({ income, expense }) => {
+export const IncomeExpenseFlow: React.FC<IncomeExpenseFlowProps> = ({
+  income,
+  expense,
+}) => {
   const total = income + expense;
   if (total === 0) return null;
 
@@ -198,9 +222,7 @@ export const IncomeExpenseFlow: React.FC<IncomeExpenseFlowProps> = ({ income, ex
       <div className="flow-header">
         <h3>Flujo del mes</h3>
         {income > expense && (
-          <span className="savings-badge positive">
-            +{savingsRate}% ahorro
-          </span>
+          <span className="savings-badge positive">+{savingsRate}% ahorro</span>
         )}
       </div>
 
@@ -220,11 +242,15 @@ export const IncomeExpenseFlow: React.FC<IncomeExpenseFlowProps> = ({ income, ex
       <div className="flow-legend">
         <div className="flow-legend-col">
           <span className="flow-legend-dot income-dot" />
-          <span>Ingresos: <strong>{money(income)}</strong> ({incomePct}%)</span>
+          <span>
+            Ingresos: <strong>{money(income)}</strong> ({incomePct}%)
+          </span>
         </div>
         <div className="flow-legend-col">
           <span className="flow-legend-dot expense-dot" />
-          <span>Gastos: <strong>{money(expense)}</strong> ({expensePct}%)</span>
+          <span>
+            Gastos: <strong>{money(expense)}</strong> ({expensePct}%)
+          </span>
         </div>
       </div>
     </div>

@@ -66,23 +66,50 @@ describe("Traspasos entre cuentas", () => {
   });
 
   it("rechaza montos no positivos, la misma cuenta y cuentas inexistentes", async () => {
-    const base = { amount: 100, date: "2026-01-10", fromId: "bank", toId: "cash" };
-    await expect(saveTransfer({ ...base, amount: 0 })).rejects.toThrow("mayor a cero");
-    await expect(saveTransfer({ ...base, amount: -5 })).rejects.toThrow("mayor a cero");
-    await expect(saveTransfer({ ...base, toId: "bank" })).rejects.toThrow("distintas");
-    await expect(saveTransfer({ ...base, toId: "" })).rejects.toThrow("origen y la de destino");
-    await expect(saveTransfer({ ...base, date: "10/01/2026" })).rejects.toThrow("fecha");
-    await expect(saveTransfer({ ...base, toId: "no-existe" })).rejects.toThrow("disponible");
+    const base = {
+      amount: 100,
+      date: "2026-01-10",
+      fromId: "bank",
+      toId: "cash",
+    };
+    await expect(saveTransfer({ ...base, amount: 0 })).rejects.toThrow(
+      "mayor a cero",
+    );
+    await expect(saveTransfer({ ...base, amount: -5 })).rejects.toThrow(
+      "mayor a cero",
+    );
+    await expect(saveTransfer({ ...base, toId: "bank" })).rejects.toThrow(
+      "distintas",
+    );
+    await expect(saveTransfer({ ...base, toId: "" })).rejects.toThrow(
+      "origen y la de destino",
+    );
+    await expect(saveTransfer({ ...base, date: "10/01/2026" })).rejects.toThrow(
+      "fecha",
+    );
+    await expect(saveTransfer({ ...base, toId: "no-existe" })).rejects.toThrow(
+      "disponible",
+    );
     expect(await db.entries.where("kind").equals("transfer").count()).toBe(0);
   });
 
   it("no acepta una cuenta borrada como origen ni como destino", async () => {
     await removeEntry(bank);
     await expect(
-      saveTransfer({ amount: 100, date: "2026-01-10", fromId: "bank", toId: "cash" }),
+      saveTransfer({
+        amount: 100,
+        date: "2026-01-10",
+        fromId: "bank",
+        toId: "cash",
+      }),
     ).rejects.toThrow("disponible");
     await expect(
-      saveTransfer({ amount: 100, date: "2026-01-10", fromId: "cash", toId: "bank" }),
+      saveTransfer({
+        amount: 100,
+        date: "2026-01-10",
+        fromId: "cash",
+        toId: "bank",
+      }),
     ).rejects.toThrow("disponible");
   });
 

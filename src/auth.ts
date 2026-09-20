@@ -132,7 +132,9 @@ export async function logoutUser(): Promise<void> {
   await signOut(auth);
 }
 
-export function subscribeToAuth(callback: (user: User | null) => void): () => void {
+export function subscribeToAuth(
+  callback: (user: User | null) => void,
+): () => void {
   const auth = getFirebaseAuth();
   if (!auth) {
     callback(null);

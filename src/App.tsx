@@ -317,17 +317,18 @@ function ProfileApp() {
   const month = date.slice(0, 7);
   // Todo esto recorre la cartera entera. Sin memoizar se rehacía en cada tecla
   // del buscador y en cada cambio de pestaña, aunque los datos no cambiaran.
-  const { live, fixed, debts, accounts, accountNames, transfers } = useMemo(() => {
-    const alive = entries.filter((e) => !e.deleted);
-    return {
-      live: alive,
-      fixed: alive.filter((e) => e.kind === "fixed"),
-      debts: alive.filter((e) => e.kind === "debt"),
-      accounts: alive.filter((e) => e.kind === "account"),
-      transfers: alive.filter((e) => e.kind === "transfer"),
-      accountNames: accountNameMap(alive),
-    };
-  }, [entries]);
+  const { live, fixed, debts, accounts, accountNames, transfers } =
+    useMemo(() => {
+      const alive = entries.filter((e) => !e.deleted);
+      return {
+        live: alive,
+        fixed: alive.filter((e) => e.kind === "fixed"),
+        debts: alive.filter((e) => e.kind === "debt"),
+        accounts: alive.filter((e) => e.kind === "account"),
+        transfers: alive.filter((e) => e.kind === "transfer"),
+        accountNames: accountNameMap(alive),
+      };
+    }, [entries]);
   const s = useMemo(
     () => summarize(entries, month, date, prefs.budget),
     [entries, month, date, prefs.budget],
@@ -423,8 +424,7 @@ function ProfileApp() {
     // quedan apuntando a una que ya no aparece al editarlos.
     const inUse = live.filter(
       (e) =>
-        (e.kind === "transaction" || e.kind === "fixed") &&
-        e.category === name,
+        (e.kind === "transaction" || e.kind === "fixed") && e.category === name,
     ).length;
     if (!inUse) {
       await remove();
@@ -722,7 +722,11 @@ function ProfileApp() {
                     : ""
               }
             >
-              {e.kind === "transfer" ? "" : e.direction === "income" ? "+" : "−"}
+              {e.kind === "transfer"
+                ? ""
+                : e.direction === "income"
+                  ? "+"
+                  : "−"}
               {fmt(e.amount)}
             </strong>
             <button
@@ -2047,10 +2051,7 @@ function ProfileApp() {
         </Modal>
       )}
       {confirmState && (
-        <ConfirmModal
-          {...confirmState}
-          onClose={() => setConfirmState(null)}
-        />
+        <ConfirmModal {...confirmState} onClose={() => setConfirmState(null)} />
       )}
     </div>
   );
@@ -2158,7 +2159,9 @@ function TransferForm({
             onChange={(e) => {
               setFromId(e.target.value);
               if (e.target.value === toId)
-                setToId(accounts.find((a) => a.id !== e.target.value)?.id || "");
+                setToId(
+                  accounts.find((a) => a.id !== e.target.value)?.id || "",
+                );
             }}
           >
             {options(toId)}

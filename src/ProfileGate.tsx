@@ -111,12 +111,10 @@ function RenameProfileModal({
             required
           />
         </label>
-        <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="secondary"
-            onClick={onClose}
-          >
+        <div
+          style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}
+        >
+          <button type="button" className="secondary" onClick={onClose}>
             Cancelar
           </button>
           <button
@@ -464,7 +462,8 @@ export function ProfileGate({ children }: { children: ReactNode }) {
               <ArrowRight size={18} />
             </button>
             <span className="local-caption">
-              <Smartphone size={14} /> Sin cuenta obligatoria. Tus datos se guardan aquí.
+              <Smartphone size={14} /> Sin cuenta obligatoria. Tus datos se
+              guardan aquí.
             </span>
           </form>
         ) : cloud !== null ? (

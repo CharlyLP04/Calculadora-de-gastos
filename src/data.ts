@@ -307,7 +307,9 @@ export function validEntries(value: unknown): value is Entry[] {
       return false;
     ids.add(e.id);
     return (
-      ["transaction", "fixed", "debt", "account", "transfer"].includes(e.kind) &&
+      ["transaction", "fixed", "debt", "account", "transfer"].includes(
+        e.kind,
+      ) &&
       typeof e.title === "string" &&
       e.title.length <= 200 &&
       typeof e.amount === "number" &&

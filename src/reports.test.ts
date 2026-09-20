@@ -40,7 +40,9 @@ afterAll(async () => {
 
 describe("Respaldo JSON", () => {
   it("restaura las categorías personalizadas junto con los movimientos", async () => {
-    await restoreBackup(backup({ customCategories: ["Ahorro viaje", "Renta"] }));
+    await restoreBackup(
+      backup({ customCategories: ["Ahorro viaje", "Renta"] }),
+    );
     const prefs = await db.prefs.get("main");
     expect(prefs?.budget).toBe(8000);
     expect(getCategories(prefs)).toEqual(["Ahorro viaje", "Renta"]);

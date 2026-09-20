@@ -106,9 +106,7 @@ export async function exportReport(
         entries
           .filter(
             (e) =>
-              !e.deleted &&
-              e.kind === "transfer" &&
-              e.date.startsWith(month),
+              !e.deleted && e.kind === "transfer" && e.date.startsWith(month),
           )
           .map((e) => ({
             Fecha: e.date,
@@ -195,7 +193,9 @@ export async function restoreBackup(file: File) {
   try {
     data = JSON.parse(await file.text());
   } catch {
-    throw new Error("El archivo no tiene un formato JSON válido o está dañado.");
+    throw new Error(
+      "El archivo no tiene un formato JSON válido o está dañado.",
+    );
   }
   if (
     !data ||

@@ -82,14 +82,22 @@ describe("Resumen por días del calendario", () => {
     const entries: Entry[] = [
       { ...base, id: "a", date: "2024-02-10", amount: 100 },
       { ...base, id: "b", date: "2024-02-10", amount: 50 },
-      { ...base, id: "c", date: "2024-02-10", amount: 900, direction: "income" },
+      {
+        ...base,
+        id: "c",
+        date: "2024-02-10",
+        amount: 900,
+        direction: "income",
+      },
       { ...base, id: "d", date: "2024-02-12", amount: 30 },
       { ...base, id: "e", date: "2024-02-12", amount: 70, deleted: true },
       { ...base, id: "f", date: "2024-03-01", amount: 500 },
       { ...base, id: "g", kind: "fixed", date: "2024-02-10", amount: 2900 },
     ];
     const { allowance, byDay } = summarizeDays(entries, "2024-02", 5800);
-    expect(allowance).toBe(summarize(entries, "2024-02", "2024-02-01", 5800).allowance);
+    expect(allowance).toBe(
+      summarize(entries, "2024-02", "2024-02-01", 5800).allowance,
+    );
     for (const day of ["2024-02-10", "2024-02-12", "2024-02-11"]) {
       const reference = summarize(entries, "2024-02", day, 5800);
       expect(byDay.get(day)?.expense || 0).toBe(reference.dayExpense);

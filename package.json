@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "server": "node server/index.mjs",
     "deploy": "firebase deploy"
   },

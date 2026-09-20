@@ -153,7 +153,5 @@ test("a transfer needs two different accounts and a positive amount", async () =
   await assertFails(setDoc(target, { ...transfer, accountId: "" }));
   await assertFails(setDoc(target, { ...transfer, amount: 0 }));
   await assertSucceeds(setDoc(target, transfer));
-  await assertSucceeds(
-    updateDoc(target, { deleted: true, updated: 101 }),
-  );
+  await assertSucceeds(updateDoc(target, { deleted: true, updated: 101 }));
 });

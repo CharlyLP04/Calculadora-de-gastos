@@ -174,7 +174,12 @@ it("uploads a local change without scanning the collection", async () => {
   await db.entries.put(entry);
   await syncWithFirestore();
   mock.reads.length = 0;
-  await db.entries.put({ ...entry, id: "taco", amount: 90, updated: Date.now() });
+  await db.entries.put({
+    ...entry,
+    id: "taco",
+    amount: 90,
+    updated: Date.now(),
+  });
   expect(await syncWithFirestore()).toBe(1);
   expect(mock.reads).toHaveLength(0);
   expect(mock.records.get(root + "/entries/taco").amount).toBe(90);
@@ -185,7 +190,11 @@ it("scans again and downloads when another device bumped the revision", async ()
   const rev = mock.records.get(root).rev;
   mock.reads.length = 0;
   // Otro dispositivo escribe un registro y avanza la revisión del perfil.
-  mock.records.set(root + "/entries/taco", { ...entry, id: "taco", amount: 90 });
+  mock.records.set(root + "/entries/taco", {
+    ...entry,
+    id: "taco",
+    amount: 90,
+  });
   mock.records.set(root, { ...mock.records.get(root), rev: rev + 1 });
   expect(await syncWithFirestore()).toBe(1);
   expect(mock.reads).toEqual([root + "/entries"]);

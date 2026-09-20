@@ -284,7 +284,9 @@ dialog .ios-banner.is-dismissing {
   box-sizing: border-box;
   min-width: 0;
   position: relative;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
 }
 .profile-choice:hover,
 .profile-item-card:hover {
@@ -321,7 +323,10 @@ dialog .ios-banner.is-dismissing {
   background: rgba(255, 255, 255, 0.04);
   color: #9fb7c8;
   cursor: pointer;
-  transition: background 0.18s, color 0.18s, transform 0.18s;
+  transition:
+    background 0.18s,
+    color 0.18s,
+    transform 0.18s;
   flex-shrink: 0;
 }
 .profile-action-btn:hover {
@@ -461,7 +466,10 @@ dialog .ios-banner.is-dismissing {
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
   display: block;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
 }
 .maker-credit img:hover {
   transform: translateY(-1px);
@@ -927,11 +935,15 @@ dialog::backdrop {
   place-items: center;
   z-index: 90;
   cursor: pointer;
-  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.4, 1), box-shadow 0.18s ease;
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.8, 0.4, 1),
+    box-shadow 0.18s ease;
 }
 .fab-add-button:hover {
   transform: scale(1.06);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .fab-add-button:active {
   transform: scale(0.92);
@@ -974,7 +986,9 @@ dialog::backdrop {
   border-radius: 999px;
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.18s, border-color 0.18s;
+  transition:
+    background 0.18s,
+    border-color 0.18s;
   min-height: 36px;
 }
 .add-category-chip:hover {
@@ -1055,4 +1069,3 @@ dialog::backdrop {
 .ios-banner {
   z-index: 100000 !important;
 }
-

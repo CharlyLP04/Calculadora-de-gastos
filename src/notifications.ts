@@ -2,11 +2,17 @@
 // Supports native device notifications (Android notification shade, iOS 16.4+ lock screen, Windows/macOS)
 // using ServiceWorkerRegistration.showNotification with automatic desktop fallback.
 
-export type NotificationStatus = "granted" | "denied" | "default" | "unsupported";
+export type NotificationStatus =
+  "granted" | "denied" | "default" | "unsupported";
 
 function getNotificationApi(): typeof Notification | undefined {
-  if (typeof window !== "undefined" && "Notification" in window) return window.Notification;
-  if (typeof globalThis !== "undefined" && "Notification" in (globalThis as any)) return (globalThis as any).Notification;
+  if (typeof window !== "undefined" && "Notification" in window)
+    return window.Notification;
+  if (
+    typeof globalThis !== "undefined" &&
+    "Notification" in (globalThis as any)
+  )
+    return (globalThis as any).Notification;
   return undefined;
 }
 
@@ -16,7 +22,9 @@ export function isNotificationSupported(): boolean {
 
 export function isIosDevice(): boolean {
   if (typeof navigator === "undefined") return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+  );
 }
 
 export function isStandalonePwa(): boolean {
@@ -24,7 +32,8 @@ export function isStandalonePwa(): boolean {
   const isDisplayStandalone =
     typeof window.matchMedia === "function" &&
     window.matchMedia("(display-mode: standalone)").matches;
-  const isNavigatorStandalone = typeof navigator !== "undefined" && (navigator as any).standalone === true;
+  const isNavigatorStandalone =
+    typeof navigator !== "undefined" && (navigator as any).standalone === true;
   return Boolean(isDisplayStandalone || isNavigatorStandalone);
 }
 

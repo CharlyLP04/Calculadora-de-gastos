@@ -51,7 +51,10 @@ beforeEach(() => {
 describe("Acceso con Google", () => {
   it("usa redirección en móvil y en la PWA instalada, no en una ventana angosta", async () => {
     const { isMobileOrStandalone } = await import("./auth");
-    stubBrowser("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", false);
+    stubBrowser(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+      false,
+    );
     expect(isMobileOrStandalone()).toBe(true);
     stubBrowser("Mozilla/5.0 (Windows NT 10.0; Win64; x64)", true);
     expect(isMobileOrStandalone()).toBe(true);
