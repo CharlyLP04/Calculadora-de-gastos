@@ -309,21 +309,24 @@ export function ProfileGate({ children }: { children: ReactNode }) {
         ),
       );
 
-    // Revisar si volvimos de una redirección de autenticación de Google en móvil
-    void handleAuthRedirectResult().then(async (user) => {
-      if (user) {
-        try {
-          const cloudProfiles = await listCloudProfiles();
-          setCloud(cloudProfiles);
-        } catch (e) {
-          setError(
-            e instanceof Error
-              ? e.message
-              : "No se pudieron recuperar las carteras de Google.",
-          );
+    // Revisar si volvimos de una redirección de autenticación de Google en móvil.
+    // Si ya hay una cartera abierta, la redirección venía de Configuración y es
+    // la app quien debe vincularla: aquí solo la consumiríamos a medias.
+    if (!sessionProfileId)
+      void handleAuthRedirectResult().then(async (user) => {
+        if (user) {
+          try {
+            const cloudProfiles = await listCloudProfiles();
+            setCloud(cloudProfiles);
+          } catch (e) {
+            setError(
+              e instanceof Error
+                ? e.message
+                : "No se pudieron recuperar las carteras de Google.",
+            );
+          }
         }
-      }
-    });
+      });
 
     const update = () => setOnline(navigator.onLine);
     window.addEventListener("online", update);

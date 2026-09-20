@@ -71,7 +71,14 @@ import {
 import { syncData, waitForSyncIdle } from "./firebase";
 import { exportReport, restoreBackup } from "./reports";
 import { enableLock, unlock, disableLock, hasLock } from "./security";
-import { loginWithGoogle, logoutUser, subscribeToAuth } from "./auth";
+import {
+  loginWithGoogle,
+  logoutUser,
+  subscribeToAuth,
+  handleAuthRedirectResult,
+  isRedirectStarted,
+  PENDING_LINK_KEY,
+} from "./auth";
 import { ProfileGate, Credits, GoogleMark } from "./ProfileGate";
 import {
   activeProfile,
@@ -79,6 +86,7 @@ import {
   linkProfile,
   pauseCloud,
   cloudScope,
+  sessionProfileId,
 } from "./profiles";
 import type { User } from "firebase/auth";
 import { CategoryDonutChart, IncomeExpenseFlow } from "./components/Charts";
@@ -391,15 +399,49 @@ function ProfileApp() {
     await savePrefs({ customCategories: updated });
     notify(`Categoría “${name}” eliminada`);
   };
+  const linkCurrentProfile = async (user: User) => {
+    await linkProfile(user.uid, user.email);
+    notify("Google conectado a este perfil. Preparando el respaldo…");
+  };
   const handleConnect = async () => {
     setBusy(true);
     await run(async () => {
-      const user = await loginWithGoogle();
-      await linkProfile(user.uid, user.email);
-      notify("Google conectado a este perfil. Preparando el respaldo…");
+      // En móvil y en la PWA instalada el acceso se hace por redirección: la
+      // pestaña se va a Google y esta función no vuelve. Dejamos anotado qué
+      // cartera esperaba vincularse para retomarlo al regresar.
+      if (sessionProfileId)
+        sessionStorage.setItem(PENDING_LINK_KEY, sessionProfileId);
+      try {
+        await linkCurrentProfile(await loginWithGoogle());
+      } catch (error) {
+        if (!isRedirectStarted(error))
+          sessionStorage.removeItem(PENDING_LINK_KEY);
+        throw error;
+      }
+      sessionStorage.removeItem(PENDING_LINK_KEY);
     });
     setBusy(false);
   };
+  // Regreso de la redirección de Google: sin esto la cartera quedaba con sesión
+  // iniciada pero sin vincular, y el botón seguía ofreciendo conectarla.
+  useEffect(() => {
+    const pending = sessionStorage.getItem(PENDING_LINK_KEY);
+    if (!pending) return;
+    void handleAuthRedirectResult()
+      .then(async (user) => {
+        sessionStorage.removeItem(PENDING_LINK_KEY);
+        if (!user || pending !== sessionProfileId) return;
+        await linkCurrentProfile(user);
+      })
+      .catch((error) => {
+        sessionStorage.removeItem(PENDING_LINK_KEY);
+        notify(
+          error instanceof Error
+            ? error.message
+            : "No se pudo conectar Google a esta cartera.",
+        );
+      });
+  }, []);
   const handleLogout = async () => {
     setBusy(true);
     await run(async () => {

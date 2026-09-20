@@ -26,23 +26,49 @@ export function isMobileOrStandalone(): boolean {
     return false;
   const ua = navigator.userAgent || "";
   const isMobileUA = /iPhone|iPad|iPod|Android|Mobile/i.test(ua);
+  // Una ventana de escritorio angosta NO es una PWA instalada: ahí el popup
+  // funciona bien y evita el viaje de ida y vuelta de la redirección.
   const isStandalone =
     (window.navigator as any).standalone === true ||
-    window.matchMedia?.("(display-mode: standalone)").matches ||
-    window.matchMedia?.("(max-width: 640px)").matches;
+    window.matchMedia?.("(display-mode: standalone)").matches === true;
   return Boolean(isMobileUA || isStandalone);
 }
 
-export async function handleAuthRedirectResult(): Promise<User | null> {
-  const auth = getFirebaseAuth();
-  if (!auth) return null;
-  try {
-    const result = await getRedirectResult(auth);
-    return result ? result.user : null;
-  } catch (err) {
-    console.warn("No se pudo obtener el resultado de redirección de Google:", err);
-    return null;
+// La cartera que esperaba vincularse cuando empezó la redirección. Sobrevive al
+// viaje a Google porque la pestaña es la misma.
+export const PENDING_LINK_KEY = "clara-pending-google-link";
+
+export const REDIRECT_STARTED = "clara/redirect-started";
+export class RedirectStartedError extends Error {
+  code = REDIRECT_STARTED;
+  constructor() {
+    super("Te estamos llevando a Google. Vuelve a esta pantalla al terminar.");
+    this.name = "RedirectStartedError";
   }
+}
+export const isRedirectStarted = (error: unknown) =>
+  (error as { code?: string } | null)?.code === REDIRECT_STARTED;
+
+// getRedirectResult solo entrega el resultado una vez por carga de página, y
+// tanto la portada como la app lo consultan. Se memoiza para que ambos lean lo
+// mismo y ninguno se quede con null.
+let redirectResult: Promise<User | null> | null = null;
+export function handleAuthRedirectResult(): Promise<User | null> {
+  if (!redirectResult) {
+    const auth = getFirebaseAuth();
+    redirectResult = !auth
+      ? Promise.resolve(null)
+      : getRedirectResult(auth)
+          .then((result) => result?.user ?? null)
+          .catch((err) => {
+            console.warn(
+              "No se pudo obtener el resultado de redirección de Google:",
+              err,
+            );
+            return null;
+          });
+  }
+  return redirectResult;
 }
 
 export async function loginWithGoogle(forceRedirect = false): Promise<User> {
@@ -56,15 +82,11 @@ export async function loginWithGoogle(forceRedirect = false): Promise<User> {
   // En móviles o PWA standalone, popup se bloquea o pierde conexión con el opener.
   // Usar signInWithRedirect garantiza el flujo sin trabarse.
   if (forceRedirect || isMobileOrStandalone()) {
-    try {
-      await signInWithRedirect(auth, provider);
-      // signInWithRedirect redirige la ventana; devolvemos una promesa que espera o se resuelve si ya hay usuario
-      return new Promise<User>((_, reject) => {
-        setTimeout(() => reject(new Error("Redirigiendo a Google...")), 3000);
-      });
-    } catch (err) {
-      throw err;
-    }
+    await signInWithRedirect(auth, provider);
+    // La ventana ya navega hacia Google: esta llamada no puede devolver un
+    // usuario. Quien la invoca debe dejar constancia de lo que estaba haciendo
+    // y retomarlo con handleAuthRedirectResult al volver.
+    throw new RedirectStartedError();
   }
 
   // En navegadores de escritorio: intentar popup con watchdog timeout de 15 segundos
