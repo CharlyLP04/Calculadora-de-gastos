@@ -28,6 +28,9 @@ export interface Prefs {
   customCategories?: string[];
   prefsUpdated?: number;
   notificationsEnabled?: boolean;
+  // Última revisión del perfil en la nube ya reconciliada. Solo local: permite
+  // saltarse la lectura completa de la colección cuando nada cambió.
+  syncedRev?: number;
 }
 export class Database extends Dexie {
   entries!: Table<Entry, string>;

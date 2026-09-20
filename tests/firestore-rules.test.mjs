@@ -116,3 +116,19 @@ test("legacy data can only be recovered by its owner, never written by old clien
   await assertFails(getDoc(doc(other, "clara_users/ana/entries/coffee")));
   await assertFails(setDoc(doc(own, "clara_users/ana/entries/coffee"), entry));
 });
+test("profile revision only moves forward and cannot be reset by an old client", async () => {
+  const base = { name: "Personal", created: 100 };
+  await env.withSecurityRulesDisabled(async (context) =>
+    setDoc(doc(context.firestore(), root), base),
+  );
+  const db = env.authenticatedContext("ana", claims).firestore();
+  const profile = doc(db, root);
+  await assertSucceeds(setDoc(profile, { ...base, rev: 1 }));
+  await assertSucceeds(setDoc(profile, { ...base, rev: 2 }));
+  await assertSucceeds(setDoc(profile, { ...base, rev: 2 }));
+  await assertFails(setDoc(profile, { ...base, rev: 1 }));
+  await assertFails(setDoc(profile, base));
+  await assertFails(setDoc(profile, { ...base, rev: -1 }));
+  await assertFails(setDoc(profile, { ...base, rev: "3" }));
+  await assertFails(setDoc(profile, { ...base, rev: 3, created: 200 }));
+});

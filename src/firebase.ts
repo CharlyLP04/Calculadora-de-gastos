@@ -90,6 +90,23 @@ async function requireScope() {
     );
   return { ...scope, profile };
 }
+// El documento raíz del perfil lleva un contador `rev` que cualquier dispositivo
+// incrementa dentro de una transacción al escribir. Comparar ese contador cuesta
+// UNA lectura; recorrer la colección cuesta una por registro. No depende del reloj
+// de ningún dispositivo, a diferencia de comparar marcas de tiempo.
+const revisionOf = (meta: { exists: () => boolean; data: () => any }) => {
+  const value = meta.exists() ? meta.data()?.rev : undefined;
+  return Number.isFinite(value) && value >= 0 ? Number(value) : 0;
+};
+
+async function localWatermark() {
+  const [newest, prefs] = await Promise.all([
+    db.entries.orderBy("updated").last(),
+    db.prefs.get("main"),
+  ]);
+  return Math.max(newest?.updated || 0, prefs?.prefsUpdated || 0);
+}
+
 export async function syncWithFirestore(_prefs?: Prefs): Promise<number> {
   const generation = getSyncGeneration();
   const startedAt = new Date().toISOString();
@@ -105,14 +122,62 @@ export async function syncWithFirestore(_prefs?: Prefs): Promise<number> {
       throw new Error("La sincronización se pausó.");
   };
   // Server reads and transactions fail offline: never label cached data as synced.
-  const remoteSnapshot = await getDocsFromServer(entriesCol);
+  const before = (await db.prefs.get("main")) || defaults;
+  const pendingLocally =
+    !before.lastSync || (await localWatermark()) > Date.parse(before.lastSync);
+  const metaSnapshot = await getDocFromServer(root);
   await assertCurrent();
-  const localEntries = await db.entries.toArray();
-  const localMap = new Map(localEntries.map((e) => [e.id, e]));
-  const ids = [
-    ...new Set([...localMap.keys(), ...remoteSnapshot.docs.map((d) => d.id)]),
-  ];
+  const startRev = revisionOf(metaSnapshot);
+  if (
+    !pendingLocally &&
+    metaSnapshot.exists() &&
+    before.syncedRev !== undefined &&
+    before.syncedRev === startRev
+  ) {
+    // Nadie escribió desde la última reconciliación: una lectura y listo.
+    await db.prefs.update("main", { lastSync: startedAt });
+    return 0;
+  }
+  const remoteIntact =
+    metaSnapshot.exists() &&
+    before.syncedRev !== undefined &&
+    before.syncedRev === startRev;
+  let localMap: Map<string, Entry>;
+  let ids: string[];
+  if (remoteIntact) {
+    // Nadie escribió en la nube desde la última reconciliación completa, así que
+    // basta con subir lo que cambió aquí: recorrer la colección no aportaría nada.
+    const since = before.lastSync ? Date.parse(before.lastSync) : 0;
+    const changed = await db.entries.where("updated").above(since).toArray();
+    localMap = new Map(changed.map((e) => [e.id, e]));
+    ids = [...localMap.keys()];
+  } else {
+    const remoteSnapshot = await getDocsFromServer(entriesCol);
+    await assertCurrent();
+    const remoteMap = new Map<string, Entry>();
+    for (const snapshot of remoteSnapshot.docs) {
+      const remote = snapshot.data() as Entry;
+      if (!validEntries([remote]) || remote.id !== snapshot.id)
+        throw new Error(
+          "Hay un registro no válido en la nube. Tus datos locales están intactos.",
+        );
+      remoteMap.set(snapshot.id, remote);
+    }
+    const localEntries = await db.entries.toArray();
+    localMap = new Map(localEntries.map((e) => [e.id, e]));
+    // Solo los registros que difieren vuelven a leerse dentro de una transacción;
+    // los idénticos no necesitan releerse ni escribirse.
+    ids = [...new Set([...localMap.keys(), ...remoteMap.keys()])].filter(
+      (id) => {
+        const local = localMap.get(id);
+        const remote = remoteMap.get(id);
+        if (local && (!remote || local.updated > remote.updated)) return true;
+        return !!remote && (!local || remote.updated > local.updated);
+      },
+    );
+  }
   let changes = 0;
+  let wrote = false;
   for (let offset = 0; offset < ids.length; offset += 100) {
     await assertCurrent();
     const chunk = ids.slice(offset, offset + 100);
@@ -148,12 +213,13 @@ export async function syncWithFirestore(_prefs?: Prefs): Promise<number> {
           await db.entries.put(entry);
       }
     });
+    if (result.uploads > 0) wrote = true;
     changes += result.downloads.length + result.uploads;
   }
   await assertCurrent();
   const localPrefs = (await db.prefs.get("main")) || defaults;
   const prefsRef = doc(root, "preferences", "main");
-  const remotePrefs = await runTransaction(firestore, async (transaction) => {
+  const settled = await runTransaction(firestore, async (transaction) => {
     await assertCurrent();
     const [meta, snapshot] = await Promise.all([
       transaction.get(root),
@@ -162,8 +228,7 @@ export async function syncWithFirestore(_prefs?: Prefs): Promise<number> {
     const remote = snapshot.exists() ? snapshot.data() : undefined;
     if (remote && !validCloudPreferences(remote))
       throw new Error("Las preferencias de la nube no son válidas.");
-    if (!meta.exists())
-      transaction.set(root, { name: profile.name, created: profile.created });
+    let prefsUploaded = false;
     if (!remote || (localPrefs.prefsUpdated || 0) > remote.updated) {
       transaction.set(prefsRef, {
         budget: localPrefs.budget,
@@ -171,13 +236,34 @@ export async function syncWithFirestore(_prefs?: Prefs): Promise<number> {
           localPrefs.customCategories || defaults.customCategories,
         updated: localPrefs.prefsUpdated || 0,
       });
-      return undefined;
+      prefsUploaded = true;
     }
-    return remote;
+    const currentRev = revisionOf(meta);
+    const nextRev = wrote || prefsUploaded ? currentRev + 1 : currentRev;
+    if (!meta.exists())
+      transaction.set(root, {
+        name: profile.name,
+        created: profile.created,
+        rev: nextRev,
+      });
+    else if (nextRev !== currentRev || meta.data()?.rev === undefined)
+      transaction.set(root, {
+        name: meta.data().name,
+        created: meta.data().created,
+        rev: nextRev,
+      });
+    // Si otro dispositivo escribió mientras recorríamos la colección, lo que
+    // acabamos de leer ya puede estar incompleto: no marcamos esta revisión
+    // como reconciliada y la próxima sincronización vuelve a recorrer todo.
+    return {
+      remote: prefsUploaded ? undefined : remote,
+      syncedRev: currentRev === startRev ? nextRev : undefined,
+    };
   });
   await assertCurrent();
   await db.transaction("rw", db.prefs, async () => {
     const current = (await db.prefs.get("main")) || defaults;
+    const remotePrefs = settled.remote;
     if (remotePrefs && remotePrefs.updated > (current.prefsUpdated || 0)) {
       await db.prefs.put({
         ...current,
@@ -186,7 +272,10 @@ export async function syncWithFirestore(_prefs?: Prefs): Promise<number> {
         prefsUpdated: remotePrefs.updated,
       });
     }
-    await db.prefs.update("main", { lastSync: startedAt });
+    await db.prefs.update("main", {
+      lastSync: startedAt,
+      syncedRev: settled.syncedRev,
+    });
   });
   return changes;
 }

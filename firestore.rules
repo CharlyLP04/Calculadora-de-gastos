@@ -1,5 +1,6 @@
 rules_version = '2';
-// clara_users/{Google UID}/profiles/{cloud profile ID}: name (1..40), created (ms).
+// clara_users/{Google UID}/profiles/{cloud profile ID}: name (1..40), created (ms),
+// rev (contador de escrituras, solo creciente).
 // entries/{id}: Entry in src/data.ts, bounded MXN amounts, date YYYY-MM-DD,
 // updated timestamp, optional debt fields and deletion tombstone.
 // preferences/main: budget, customCategories (bounded list), updated timestamp.
@@ -14,8 +15,14 @@ service cloud.firestore {
     function time(n) { return n is number && n >= 0 && n <= 9007199254740991; }
     function text(s, max) { return s is string && s.size() <= max; }
     function validProfile(d) {
-      return d.keys().hasAll(['name','created']) && d.keys().hasOnly(['name','created'])
-        && text(d.name,40) && d.name.size() > 0 && time(d.created);
+      return d.keys().hasAll(['name','created']) && d.keys().hasOnly(['name','created','rev'])
+        && text(d.name,40) && d.name.size() > 0 && time(d.created)
+        && (!('rev' in d) || time(d.rev));
+    }
+    // rev solo avanza: así un dispositivo puede saber con UNA lectura si alguien
+    // escribió, en vez de recorrer toda la colección de registros.
+    function growingRevision() {
+      return request.resource.data.get('rev',0) >= resource.data.get('rev',0);
     }
     function validEntry(d, id) {
       return d.keys().hasAll(['id','kind','title','amount','date','category','account','updated'])
@@ -43,7 +50,8 @@ service cloud.firestore {
       allow read: if owner(uid);
       allow create: if owner(uid) && validProfile(request.resource.data);
       allow update: if owner(uid) && validProfile(request.resource.data)
-        && request.resource.data.created == resource.data.created;
+        && request.resource.data.created == resource.data.created
+        && growingRevision();
       match /entries/{entryId} {
         allow read: if owner(uid);
         allow create: if owner(uid) && validEntry(request.resource.data, entryId);
