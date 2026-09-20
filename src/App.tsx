@@ -402,9 +402,30 @@ function ProfileApp() {
       notify("Debes tener al menos una categoría");
       return;
     }
-    const updated = availableCategories.filter((c) => c !== name);
-    await savePrefs({ customCategories: updated });
-    notify(`Categoría “${name}” eliminada`);
+    const remove = async () => {
+      await savePrefs({
+        customCategories: availableCategories.filter((c) => c !== name),
+      });
+      notify(`Categoría “${name}” eliminada`);
+    };
+    // Los movimientos conservan el nombre de la categoría: si se borra sin más,
+    // quedan apuntando a una que ya no aparece al editarlos.
+    const inUse = live.filter(
+      (e) =>
+        (e.kind === "transaction" || e.kind === "fixed") &&
+        e.category === name,
+    ).length;
+    if (!inUse) {
+      await remove();
+      return;
+    }
+    setConfirmState({
+      title: `¿Eliminar la categoría “${name}”?`,
+      message: `${inUse} registro(s) la usan. Se conservan con ese nombre y siguen contando en tus totales, pero la categoría dejará de ofrecerse al registrar o editar.`,
+      confirmLabel: "Eliminar categoría",
+      isDestructive: true,
+      onConfirm: () => void run(remove),
+    });
   };
   const linkCurrentProfile = async (user: User) => {
     await linkProfile(user.uid, user.email);
