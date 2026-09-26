@@ -147,9 +147,13 @@ test("a transfer needs two different accounts and a positive amount", async () =
     updated: 100,
   };
   const target = doc(db, root, "entries", "move");
+  // Los campos que faltan se omiten construyendo el objeto sin ellos: poner
+  // undefined lo rechaza el SDK en el cliente, antes de llegar a las reglas.
+  const { toAccountId, ...sinDestino } = transfer;
+  const { accountId, ...sinOrigen } = transfer;
   await assertFails(setDoc(target, { ...transfer, toAccountId: "acc-cash" }));
-  await assertFails(setDoc(target, { ...transfer, toAccountId: undefined }));
-  await assertFails(setDoc(target, { ...transfer, accountId: undefined }));
+  await assertFails(setDoc(target, sinDestino));
+  await assertFails(setDoc(target, sinOrigen));
   await assertFails(setDoc(target, { ...transfer, accountId: "" }));
   await assertFails(setDoc(target, { ...transfer, amount: 0 }));
   await assertSucceeds(setDoc(target, transfer));
