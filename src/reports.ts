@@ -1,11 +1,15 @@
 import {
   db,
+  defaults,
+  getCategories,
   validEntries,
   type Entry,
   type Prefs,
   summarize,
   money,
   debtRemaining,
+  accountLabel,
+  accountNameMap,
 } from "./data";
 export function download(data: BlobPart, name: string, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type }));
@@ -26,10 +30,13 @@ export async function exportReport(
     download(
       JSON.stringify(
         {
+          // Sigue siendo la versión 1: customCategories es opcional, así que
+          // una versión anterior de Clara puede restaurar este archivo sin él.
           version: 1,
           exportedAt: new Date().toISOString(),
           entries: await db.entries.toArray(),
           budget: prefs.budget,
+          customCategories: getCategories(prefs),
         },
         null,
         2,
@@ -40,11 +47,12 @@ export async function exportReport(
     return;
   }
   const s = summarize(entries, month, month + "-01", prefs.budget);
+  const names = accountNameMap(entries);
   const rows = s.tx.map((e) => ({
     Fecha: e.date,
     Concepto: safe(e.title),
     Categoría: safe(e.category),
-    Cuenta: safe(e.account),
+    Cuenta: safe(accountLabel(e, names)),
     Tipo: e.direction === "income" ? "Ingreso" : "Gasto",
     Monto: e.amount,
   }));
@@ -89,6 +97,26 @@ export async function exportReport(
       wb,
       XLSX.utils.json_to_sheet(rows),
       "Movimientos",
+    );
+    // Los traspasos van aparte: mueven dinero entre cuentas propias y sumarlos a
+    // los movimientos del mes inflaría ingresos y gastos por igual.
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(
+        entries
+          .filter(
+            (e) =>
+              !e.deleted && e.kind === "transfer" && e.date.startsWith(month),
+          )
+          .map((e) => ({
+            Fecha: e.date,
+            Concepto: safe(e.title),
+            Desde: safe(names.get(e.accountId || "") || e.account),
+            Hacia: safe(names.get(e.toAccountId || "") || "Cuenta eliminada"),
+            Monto: e.amount,
+          })),
+      ),
+      "Traspasos",
     );
     XLSX.utils.book_append_sheet(
       wb,
@@ -165,7 +193,9 @@ export async function restoreBackup(file: File) {
   try {
     data = JSON.parse(await file.text());
   } catch {
-    throw new Error("El archivo no tiene un formato JSON válido o está dañado.");
+    throw new Error(
+      "El archivo no tiene un formato JSON válido o está dañado.",
+    );
   }
   if (
     !data ||
@@ -173,7 +203,8 @@ export async function restoreBackup(file: File) {
     !validEntries(data.entries) ||
     typeof data.budget !== "number" ||
     !Number.isFinite(data.budget) ||
-    data.budget < 0
+    data.budget < 0 ||
+    !validCategories(data.customCategories)
   )
     throw new Error("El archivo no es un respaldo válido de Clara.");
   await db.transaction("rw", db.entries, db.prefs, async () => {
@@ -188,6 +219,26 @@ export async function restoreBackup(file: File) {
     await db.entries.bulkPut(
       data.entries.map((e: Entry) => ({ ...e, updated: now })),
     );
-    await db.prefs.update("main", { budget: data.budget, prefsUpdated: now });
+    // put, no update: `update` no hace nada si aún no existe el registro de
+    // preferencias, y entonces el presupuesto restaurado se perdía en silencio.
+    const current = (await db.prefs.get("main")) || defaults;
+    await db.prefs.put({
+      ...current,
+      id: "main",
+      budget: data.budget,
+      customCategories: data.customCategories || current.customCategories,
+      prefsUpdated: now,
+    });
   });
+}
+// Las categorías son opcionales en el respaldo: los archivos anteriores no las
+// traen y deben seguir restaurándose.
+function validCategories(value: unknown): value is string[] | undefined {
+  if (value === undefined) return true;
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 100 &&
+    value.every((c) => typeof c === "string" && c.length > 0 && c.length <= 80)
+  );
 }

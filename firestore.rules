@@ -1,7 +1,9 @@
 rules_version = '2';
-// clara_users/{Google UID}/profiles/{cloud profile ID}: name (1..40), created (ms).
+// clara_users/{Google UID}/profiles/{cloud profile ID}: name (1..40), created (ms),
+// rev (contador de escrituras, solo creciente).
 // entries/{id}: Entry in src/data.ts, bounded MXN amounts, date YYYY-MM-DD,
-// updated timestamp, optional debt fields and deletion tombstone.
+// updated timestamp, optional debt fields and deletion tombstone. Un traspaso
+// (kind 'transfer') exige accountId y toAccountId distintos y monto positivo.
 // preferences/main: budget, customCategories (bounded list), updated timestamp.
 // UID is immutable in the path. Legacy /entries is owner-readable for recovery.
 service cloud.firestore {
@@ -14,20 +16,30 @@ service cloud.firestore {
     function time(n) { return n is number && n >= 0 && n <= 9007199254740991; }
     function text(s, max) { return s is string && s.size() <= max; }
     function validProfile(d) {
-      return d.keys().hasAll(['name','created']) && d.keys().hasOnly(['name','created'])
-        && text(d.name,40) && d.name.size() > 0 && time(d.created);
+      return d.keys().hasAll(['name','created']) && d.keys().hasOnly(['name','created','rev'])
+        && text(d.name,40) && d.name.size() > 0 && time(d.created)
+        && (!('rev' in d) || time(d.rev));
+    }
+    // rev solo avanza: así un dispositivo puede saber con UNA lectura si alguien
+    // escribió, en vez de recorrer toda la colección de registros.
+    function growingRevision() {
+      return request.resource.data.get('rev',0) >= resource.data.get('rev',0);
     }
     function validEntry(d, id) {
       return d.keys().hasAll(['id','kind','title','amount','date','category','account','updated'])
-        && d.keys().hasOnly(['id','kind','title','amount','date','category','account','updated','deleted','direction','debtId','total','initialPaid','monthly'])
+        && d.keys().hasOnly(['id','kind','title','amount','date','category','account','updated','deleted','direction','debtId','total','initialPaid','monthly','accountId','toAccountId'])
         && d.id == id && text(d.id,200) && d.id.size() > 0
-        && d.kind in ['transaction','fixed','debt','account']
+        && d.kind in ['transaction','fixed','debt','account','transfer']
         && text(d.title,200) && amount(d.amount)
         && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && text(d.category,200) && text(d.account,200) && time(d.updated)
         && (!('deleted' in d) || d.deleted is bool)
         && (!('direction' in d) || d.direction in ['income','expense'])
         && (!('debtId' in d) || text(d.debtId,200))
+        && (!('accountId' in d) || (text(d.accountId,200) && d.accountId.size() > 0))
+        && (!('toAccountId' in d) || (text(d.toAccountId,200) && d.toAccountId.size() > 0))
+        && (d.kind != 'transfer' || ('accountId' in d && 'toAccountId' in d
+            && d.accountId != d.toAccountId && d.amount > 0))
         && (!('total' in d) || amount(d.total))
         && (!('initialPaid' in d) || amount(d.initialPaid))
         && (!('monthly' in d) || amount(d.monthly))
@@ -43,7 +55,8 @@ service cloud.firestore {
       allow read: if owner(uid);
       allow create: if owner(uid) && validProfile(request.resource.data);
       allow update: if owner(uid) && validProfile(request.resource.data)
-        && request.resource.data.created == resource.data.created;
+        && request.resource.data.created == resource.data.created
+        && growingRevision();
       match /entries/{entryId} {
         allow read: if owner(uid);
         allow create: if owner(uid) && validEntry(request.resource.data, entryId);

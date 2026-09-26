@@ -28,7 +28,8 @@ export function NotificationSettings({
 }) {
   const [permission, setPermission] = useState(getDeviceNotificationStatus);
   const [busy, setBusy] = useState(false);
-  const active = permission === "granted" && Boolean(prefs.notificationsEnabled);
+  const active =
+    permission === "granted" && Boolean(prefs.notificationsEnabled);
 
   const change = async () => {
     setBusy(true);
@@ -99,16 +100,22 @@ export function NotificationSettings({
         <span className={badgeClass}>{badgeText}</span>
       </div>
       <p className="field-help">
-        Recibe avisos del sistema en tu dispositivo para recordar tus pagos fijos y compromisos del mes de forma oportuna.
+        Recibe avisos del sistema en tu dispositivo para recordar tus pagos
+        fijos y compromisos del mes de forma oportuna.
       </p>
       {isIosDevice() && !isStandalonePwa() && (
         <p className="inline-notice">
-          En iPhone, añade Clara a la pantalla de inicio desde Safari para habilitar los avisos del sistema.
+          En iPhone, añade Clara a la pantalla de inicio desde Safari para
+          habilitar los avisos del sistema.
         </p>
       )}
       {permission === "denied" && (
-        <p className="inline-notice" style={{ borderColor: "rgba(239, 68, 68, 0.4)", color: "#fca5a5" }}>
-          El permiso está bloqueado en los ajustes del navegador. Habilítalo para recibir avisos en este equipo.
+        <p
+          className="inline-notice"
+          style={{ borderColor: "rgba(239, 68, 68, 0.4)", color: "#fca5a5" }}
+        >
+          El permiso está bloqueado en los ajustes del navegador. Habilítalo
+          para recibir avisos en este equipo.
         </p>
       )}
 

@@ -7,3 +7,5 @@ playwright-report/
 test-results/
 .firebase/
 *-debug.log
+
+.vs/

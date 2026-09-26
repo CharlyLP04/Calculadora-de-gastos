@@ -6,6 +6,7 @@ const mock = vi.hoisted(() => {
     user: { uid: "ana" } as { uid: string } | null,
     records: new Map<string, any>(),
     reads: [] as string[],
+    docGets: 0,
     afterRead: undefined as (() => Promise<void>) | undefined,
   };
 });
@@ -33,7 +34,10 @@ vi.mock("firebase/firestore", () => {
     query: (r: any) => r,
     limit: () => ({}),
     getDocs: vi.fn(),
-    getDocFromServer: async (ref: any) => snap(ref),
+    getDocFromServer: async (ref: any) => {
+      mock.docGets++;
+      return snap(ref);
+    },
     getDocsFromServer: async (ref: any) => {
       mock.reads.push(ref.path);
       await mock.afterRead?.();
@@ -48,7 +52,10 @@ vi.mock("firebase/firestore", () => {
     },
     runTransaction: async (_: any, action: any) =>
       action({
-        get: async (ref: any) => snap(ref),
+        get: async (ref: any) => {
+          mock.docGets++;
+          return snap(ref);
+        },
         set: (ref: any, data: any) => {
           mock.records.set(ref.path, data);
         },
@@ -73,6 +80,7 @@ beforeEach(async () => {
   mock.user = { uid: "ana" };
   mock.records.clear();
   mock.reads.length = 0;
+  mock.docGets = 0;
   mock.afterRead = undefined;
   await db.entries.clear();
   await registry.profiles.clear();
@@ -151,4 +159,60 @@ it("rejects malformed remote records without marking them synchronized", async (
   await expect(syncWithFirestore()).rejects.toThrow("no válido");
   expect(await db.entries.count()).toBe(0);
   expect((await db.prefs.get("main"))?.lastSync).toBeUndefined();
+});
+it("skips the collection scan when nobody wrote since the last reconciliation", async () => {
+  await db.entries.put(entry);
+  await syncWithFirestore();
+  mock.reads.length = 0;
+  mock.docGets = 0;
+  expect(await syncWithFirestore()).toBe(0);
+  expect(mock.reads).toHaveLength(0);
+  expect(mock.docGets).toBe(1);
+  expect((await db.prefs.get("main"))?.lastSync).toBeDefined();
+});
+it("uploads a local change without scanning the collection", async () => {
+  await db.entries.put(entry);
+  await syncWithFirestore();
+  mock.reads.length = 0;
+  await db.entries.put({
+    ...entry,
+    id: "taco",
+    amount: 90,
+    updated: Date.now(),
+  });
+  expect(await syncWithFirestore()).toBe(1);
+  expect(mock.reads).toHaveLength(0);
+  expect(mock.records.get(root + "/entries/taco").amount).toBe(90);
+});
+it("scans again and downloads when another device bumped the revision", async () => {
+  await db.entries.put(entry);
+  await syncWithFirestore();
+  const rev = mock.records.get(root).rev;
+  mock.reads.length = 0;
+  // Otro dispositivo escribe un registro y avanza la revisión del perfil.
+  mock.records.set(root + "/entries/taco", {
+    ...entry,
+    id: "taco",
+    amount: 90,
+  });
+  mock.records.set(root, { ...mock.records.get(root), rev: rev + 1 });
+  expect(await syncWithFirestore()).toBe(1);
+  expect(mock.reads).toEqual([root + "/entries"]);
+  expect((await db.entries.get("taco"))?.amount).toBe(90);
+  expect((await db.prefs.get("main"))?.syncedRev).toBe(rev + 1);
+});
+it("does not trust a scan that raced with another device's write", async () => {
+  await db.entries.put(entry);
+  await syncWithFirestore();
+  await db.prefs.update("main", { syncedRev: undefined });
+  mock.afterRead = async () => {
+    const meta = mock.records.get(root);
+    mock.records.set(root, { ...meta, rev: meta.rev + 1 });
+  };
+  await syncWithFirestore();
+  mock.afterRead = undefined;
+  expect((await db.prefs.get("main"))?.syncedRev).toBeUndefined();
+  mock.reads.length = 0;
+  await syncWithFirestore();
+  expect(mock.reads).toEqual([root + "/entries"]);
 });

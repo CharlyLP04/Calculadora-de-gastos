@@ -1,6 +1,9 @@
 import Dexie, { type Table } from "dexie";
 import { profileDatabaseName, sessionProfileId } from "./profiles";
-export type Kind = "transaction" | "fixed" | "debt" | "account";
+export type Kind = "transaction" | "fixed" | "debt" | "account" | "transfer";
+// Un traspaso mueve dinero entre dos cuentas propias: no es ingreso ni gasto y
+// queda fuera de `summarize`, que solo mira kind === "transaction".
+export const TRANSFER_CATEGORY = "Traspaso";
 export interface Entry {
   id: string;
   kind: Kind;
@@ -16,6 +19,13 @@ export interface Entry {
   total?: number;
   initialPaid?: number;
   monthly?: number;
+  // Identidad estable de la cuenta. `account` guarda el nombre y sigue siendo el
+  // único dato en registros anteriores o escritos por versiones viejas, así que
+  // todo lo que reparte dinero acepta ambos (ver matchesAccount).
+  accountId?: string;
+  // Cuenta de destino de un traspaso. Los traspasos nacen después de accountId,
+  // así que siempre referencian por identificador, nunca por nombre.
+  toAccountId?: string;
 }
 export interface Prefs {
   id: string;
@@ -28,6 +38,9 @@ export interface Prefs {
   customCategories?: string[];
   prefsUpdated?: number;
   notificationsEnabled?: boolean;
+  // Última revisión del perfil en la nube ya reconciliada. Solo local: permite
+  // saltarse la lectura completa de la colección cuando nada cambió.
+  syncedRev?: number;
 }
 export class Database extends Dexie {
   entries!: Table<Entry, string>;
@@ -35,7 +48,58 @@ export class Database extends Dexie {
   constructor(profileId = sessionProfileId || "unselected") {
     super(profileDatabaseName(profileId));
     this.version(1).stores({ entries: "id,kind,date,updated", prefs: "id" });
+    // Rellena accountId a partir del nombre de cuenta ya guardado. No toca
+    // `updated` a propósito: es un dato derivado que cada dispositivo puede
+    // recalcular, y tocarlo volvería a subir toda la cartera a Firestore.
+    this.version(2)
+      .stores({ entries: "id,kind,date,updated", prefs: "id" })
+      .upgrade(async (tx) => {
+        const table = tx.table<Entry, string>("entries");
+        const all = await table.toArray();
+        const idByTitle = new Map<string, string>();
+        for (const e of all)
+          if (e.kind === "account" && !e.deleted) idByTitle.set(e.title, e.id);
+        const pending = all.filter(
+          (e) => !e.accountId && e.account && idByTitle.has(e.account),
+        );
+        if (pending.length)
+          await table.bulkPut(
+            pending.map((e) => ({ ...e, accountId: idByTitle.get(e.account) })),
+          );
+      });
   }
+}
+// Un registro pertenece a una cuenta por identidad cuando la tiene; si no, por
+// nombre, que es lo único que traen los registros anteriores a accountId.
+export const matchesAccount = (entry: Entry, account: Entry) =>
+  entry.accountId
+    ? entry.accountId === account.id
+    : entry.account === account.title;
+
+// Nombre a mostrar: el actual de la cuenta vinculada, no la copia guardada en el
+// registro, que queda obsoleta cuando se renombra la cuenta.
+export const accountNameMap = (entries: Entry[]) =>
+  new Map(
+    entries
+      .filter((e) => e.kind === "account" && !e.deleted)
+      .map((e) => [e.id, e.title] as const),
+  );
+export const accountLabel = (entry: Entry, names: Map<string, string>) =>
+  (entry.accountId && names.get(entry.accountId)) || entry.account;
+
+export function accountBalance(account: Entry, entries: Entry[]) {
+  return round(
+    entries.reduce((total, e) => {
+      if (e.deleted) return total;
+      if (e.kind === "transaction" && matchesAccount(e, account))
+        return total + (e.direction === "income" ? e.amount : -e.amount);
+      if (e.kind === "transfer") {
+        if (e.accountId === account.id) return total - e.amount;
+        if (e.toAccountId === account.id) return total + e.amount;
+      }
+      return total;
+    }, account.amount),
+  );
 }
 export const db = new Database();
 export const defaultCategories = [
@@ -140,6 +204,20 @@ export function summarize(
     dayTx,
   };
 }
+// El calendario necesita, por día, cuántos movimientos hubo y cuánto se gastó.
+// Llamar a summarize una vez por día recorría la cartera entera 31 veces (y con
+// ella debtRemaining por cada deuda); aquí basta un recorrido para todo el mes.
+export function summarizeDays(entries: Entry[], month: string, budget: number) {
+  const base = summarize(entries, month, month + "-01", budget);
+  const byDay = new Map<string, { expense: number; count: number }>();
+  for (const e of base.tx) {
+    const day = byDay.get(e.date) || { expense: 0, count: 0 };
+    day.count++;
+    if (e.direction !== "income") day.expense = round(day.expense + e.amount);
+    byDay.set(e.date, day);
+  }
+  return { allowance: base.allowance, byDay };
+}
 export function debtRemaining(debt: Entry, entries: Entry[]) {
   return round(
     Math.max(
@@ -172,6 +250,48 @@ export async function saveEntry(
 export async function removeEntry(entry: Entry) {
   await db.entries.put({ ...entry, deleted: true, updated: Date.now() });
 }
+export interface TransferInput {
+  id?: string;
+  amount: number;
+  date: string;
+  fromId: string;
+  toId: string;
+  title?: string;
+}
+export async function saveTransfer(input: TransferInput) {
+  const amount = round(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0)
+    throw new Error("Ingresa un monto mayor a cero.");
+  if (!input.fromId || !input.toId)
+    throw new Error("Elige la cuenta de origen y la de destino.");
+  if (input.fromId === input.toId)
+    throw new Error("Elige dos cuentas distintas.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date))
+    throw new Error("Revisa la fecha del traspaso.");
+  // Las cuentas se releen aquí dentro: la lista que vio el formulario pudo
+  // quedarse vieja si otro dispositivo borró una mientras se llenaba.
+  await db.transaction("rw", db.entries, async () => {
+    const [from, to] = await Promise.all([
+      db.entries.get(input.fromId),
+      db.entries.get(input.toId),
+    ]);
+    const usable = (a?: Entry) => a && a.kind === "account" && !a.deleted;
+    if (!usable(from) || !usable(to))
+      throw new Error("Alguna de las cuentas ya no está disponible.");
+    await db.entries.put({
+      id: input.id || crypto.randomUUID(),
+      kind: "transfer",
+      title: (input.title || "").trim() || `${from!.title} → ${to!.title}`,
+      amount,
+      date: input.date,
+      category: TRANSFER_CATEGORY,
+      account: from!.title,
+      accountId: from!.id,
+      toAccountId: to!.id,
+      updated: Date.now(),
+    });
+  });
+}
 export function validEntries(value: unknown): value is Entry[] {
   if (!Array.isArray(value) || value.length > 100000) return false;
   const ids = new Set<string>();
@@ -187,7 +307,9 @@ export function validEntries(value: unknown): value is Entry[] {
       return false;
     ids.add(e.id);
     return (
-      ["transaction", "fixed", "debt", "account"].includes(e.kind) &&
+      ["transaction", "fixed", "debt", "account", "transfer"].includes(
+        e.kind,
+      ) &&
       typeof e.title === "string" &&
       e.title.length <= 200 &&
       typeof e.amount === "number" &&
@@ -207,6 +329,18 @@ export function validEntries(value: unknown): value is Entry[] {
       (e.direction === undefined ||
         ["income", "expense"].includes(e.direction)) &&
       (e.deleted === undefined || typeof e.deleted === "boolean") &&
+      ["accountId", "toAccountId"].every(
+        (k) =>
+          e[k] === undefined ||
+          (typeof e[k] === "string" && e[k].length > 0 && e[k].length <= 200),
+      ) &&
+      // Un traspaso sin las dos cuentas, o con la misma dos veces, movería
+      // dinero a ninguna parte o a sí mismo.
+      (e.kind !== "transfer" ||
+        (typeof e.accountId === "string" &&
+          typeof e.toAccountId === "string" &&
+          e.accountId !== e.toAccountId &&
+          e.amount > 0)) &&
       ["total", "initialPaid", "monthly"].every(
         (k) =>
           e[k] === undefined ||

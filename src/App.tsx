@@ -1,13 +1,14 @@
 import { DateStrip, IosNotificationBanner } from "./UIEnhancements";
 import { NotificationSettings } from "./NotificationSettings";
 import { showDeviceNotification } from "./notifications";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { BrandMark } from "./Brand";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   ArrowDownLeft,
   ArrowUpRight,
   ArrowRight,
+  ArrowLeftRight,
   Wallet,
   LayoutDashboard,
   CalendarDays,
@@ -60,7 +61,12 @@ import {
   getCategories,
   summarize,
   debtRemaining,
+  matchesAccount,
+  accountBalance,
+  accountLabel,
+  accountNameMap,
   saveEntry,
+  saveTransfer,
   removeEntry,
   wipeAllData,
   setSyncBlocked,
@@ -71,7 +77,14 @@ import {
 import { syncData, waitForSyncIdle } from "./firebase";
 import { exportReport, restoreBackup } from "./reports";
 import { enableLock, unlock, disableLock, hasLock } from "./security";
-import { loginWithGoogle, logoutUser, subscribeToAuth } from "./auth";
+import {
+  loginWithGoogle,
+  logoutUser,
+  subscribeToAuth,
+  handleAuthRedirectResult,
+  isRedirectStarted,
+  PENDING_LINK_KEY,
+} from "./auth";
 import { ProfileGate, Credits, GoogleMark } from "./ProfileGate";
 import {
   activeProfile,
@@ -79,6 +92,7 @@ import {
   linkProfile,
   pauseCloud,
   cloudScope,
+  sessionProfileId,
 } from "./profiles";
 import type { User } from "firebase/auth";
 import { CategoryDonutChart, IncomeExpenseFlow } from "./components/Charts";
@@ -300,12 +314,25 @@ function ProfileApp() {
     ),
     [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   useEffect(() => subscribeToAuth(setCurrentUser), []);
-  const month = date.slice(0, 7),
-    live = entries.filter((e) => !e.deleted),
-    s = summarize(entries, month, date, prefs.budget),
-    fixed = live.filter((e) => e.kind === "fixed"),
-    debts = live.filter((e) => e.kind === "debt"),
-    accounts = live.filter((e) => e.kind === "account");
+  const month = date.slice(0, 7);
+  // Todo esto recorre la cartera entera. Sin memoizar se rehacía en cada tecla
+  // del buscador y en cada cambio de pestaña, aunque los datos no cambiaran.
+  const { live, fixed, debts, accounts, accountNames, transfers } =
+    useMemo(() => {
+      const alive = entries.filter((e) => !e.deleted);
+      return {
+        live: alive,
+        fixed: alive.filter((e) => e.kind === "fixed"),
+        debts: alive.filter((e) => e.kind === "debt"),
+        accounts: alive.filter((e) => e.kind === "account"),
+        transfers: alive.filter((e) => e.kind === "transfer"),
+        accountNames: accountNameMap(alive),
+      };
+    }, [entries]);
+  const s = useMemo(
+    () => summarize(entries, month, date, prefs.budget),
+    [entries, month, date, prefs.budget],
+  );
   const fmt = (n: number) => (prefs.hidden ? "$ ••••••" : money(n));
   const notify = (message: string) => setToast(message);
   const run = async (action: () => Promise<unknown>, message?: string) => {
@@ -387,19 +414,73 @@ function ProfileApp() {
       notify("Debes tener al menos una categoría");
       return;
     }
-    const updated = availableCategories.filter((c) => c !== name);
-    await savePrefs({ customCategories: updated });
-    notify(`Categoría “${name}” eliminada`);
+    const remove = async () => {
+      await savePrefs({
+        customCategories: availableCategories.filter((c) => c !== name),
+      });
+      notify(`Categoría “${name}” eliminada`);
+    };
+    // Los movimientos conservan el nombre de la categoría: si se borra sin más,
+    // quedan apuntando a una que ya no aparece al editarlos.
+    const inUse = live.filter(
+      (e) =>
+        (e.kind === "transaction" || e.kind === "fixed") && e.category === name,
+    ).length;
+    if (!inUse) {
+      await remove();
+      return;
+    }
+    setConfirmState({
+      title: `¿Eliminar la categoría “${name}”?`,
+      message: `${inUse} registro(s) la usan. Se conservan con ese nombre y siguen contando en tus totales, pero la categoría dejará de ofrecerse al registrar o editar.`,
+      confirmLabel: "Eliminar categoría",
+      isDestructive: true,
+      onConfirm: () => void run(remove),
+    });
+  };
+  const linkCurrentProfile = async (user: User) => {
+    await linkProfile(user.uid, user.email);
+    notify("Google conectado a este perfil. Preparando el respaldo…");
   };
   const handleConnect = async () => {
     setBusy(true);
     await run(async () => {
-      const user = await loginWithGoogle();
-      await linkProfile(user.uid, user.email);
-      notify("Google conectado a este perfil. Preparando el respaldo…");
+      // En móvil y en la PWA instalada el acceso se hace por redirección: la
+      // pestaña se va a Google y esta función no vuelve. Dejamos anotado qué
+      // cartera esperaba vincularse para retomarlo al regresar.
+      if (sessionProfileId)
+        sessionStorage.setItem(PENDING_LINK_KEY, sessionProfileId);
+      try {
+        await linkCurrentProfile(await loginWithGoogle());
+      } catch (error) {
+        if (!isRedirectStarted(error))
+          sessionStorage.removeItem(PENDING_LINK_KEY);
+        throw error;
+      }
+      sessionStorage.removeItem(PENDING_LINK_KEY);
     });
     setBusy(false);
   };
+  // Regreso de la redirección de Google: sin esto la cartera quedaba con sesión
+  // iniciada pero sin vincular, y el botón seguía ofreciendo conectarla.
+  useEffect(() => {
+    const pending = sessionStorage.getItem(PENDING_LINK_KEY);
+    if (!pending) return;
+    void handleAuthRedirectResult()
+      .then(async (user) => {
+        sessionStorage.removeItem(PENDING_LINK_KEY);
+        if (!user || pending !== sessionProfileId) return;
+        await linkCurrentProfile(user);
+      })
+      .catch((error) => {
+        sessionStorage.removeItem(PENDING_LINK_KEY);
+        notify(
+          error instanceof Error
+            ? error.message
+            : "No se pudo conectar Google a esta cartera.",
+        );
+      });
+  }, []);
   const handleLogout = async () => {
     setBusy(true);
     await run(async () => {
@@ -537,20 +618,59 @@ function ProfileApp() {
   const changeMonth = (value: string) => {
     if (/^\d{4}-\d{2}$/.test(value)) setDate(value + "-01");
   };
-  const transactions = (tab === "Diario" ? s.dayTx : s.tx)
-    .filter((e) =>
-      `${e.title} ${e.category} ${e.account}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
+  const needle = search.trim().toLowerCase();
+  // Los traspasos no son ingreso ni gasto, así que summarize los ignora, pero sí
+  // son actividad de la cartera y deben verse junto al resto de movimientos.
+  const periodTransfers = transfers.filter((e) =>
+    tab === "Diario" ? e.date === date : e.date.startsWith(month),
+  );
+  const transferLabel = (e: Entry) =>
+    `${accountNames.get(e.accountId || "") || e.account} → ${
+      accountNames.get(e.toAccountId || "") || "cuenta eliminada"
+    }`;
+  const transactions = [
+    ...(tab === "Diario" ? s.dayTx : s.tx),
+    ...periodTransfers,
+  ]
+    .filter(
+      (e) =>
+        !needle ||
+        `${e.title} ${e.category} ${
+          e.kind === "transfer"
+            ? transferLabel(e)
+            : accountLabel(e, accountNames)
+        }`
+          .toLowerCase()
+          .includes(needle),
     )
     .sort((a, b) => b.date.localeCompare(a.date) || b.updated - a.updated);
+  const describeDeletion = (e: Entry) => {
+    if (e.kind === "debt")
+      return "Esta deuda se eliminará de los compromisos activos. Los pagos y abonos realizados se conservarán en tu historial.";
+    if (e.kind === "fixed")
+      return `Se eliminará este compromiso de ${money(e.amount)} al mes. Los pagos que ya registraste se conservan.`;
+    if (e.kind === "transfer")
+      return `Se deshará este traspaso de ${money(e.amount)}: el dinero vuelve a la cuenta de origen.`;
+    if (e.kind === "account") {
+      const linked = live.filter(
+        (t) =>
+          (t.kind === "transaction" && matchesAccount(t, e)) ||
+          (t.kind === "transfer" &&
+            (t.accountId === e.id || t.toAccountId === e.id)),
+      ).length;
+      return linked
+        ? `Sus ${linked} movimiento(s) se conservan en tu historial y siguen contando en ingresos y gastos, pero dejarán de sumar a un saldo de cuenta. El saldo inicial de ${money(e.amount)} se pierde.`
+        : `Se eliminará esta cuenta y su saldo inicial de ${money(e.amount)}.`;
+    }
+    return `Se eliminará este movimiento de ${money(e.amount)} de tu contabilidad y balances.`;
+  };
   const deleteItem = (e: Entry) => {
     setConfirmState({
-      title: `¿Eliminar “${e.title}”?`,
-      message:
-        e.kind === "debt"
-          ? "Esta deuda se eliminará de los compromisos activos. Los pagos y abonos realizados se conservarán en tu historial."
-          : `Se eliminará este movimiento de ${money(e.amount)} de tu contabilidad y balances.`,
+      title:
+        e.kind === "account"
+          ? `¿Eliminar la cuenta “${e.title}”?`
+          : `¿Eliminar “${e.title}”?`,
+      message: describeDeletion(e),
       confirmLabel: "Eliminar",
       isDestructive: true,
       onConfirm: () => {
@@ -564,9 +684,17 @@ function ProfileApp() {
         {list.map((e) => (
           <div className="transaction" key={e.id}>
             <div
-              className={`category-icon ${e.direction === "income" ? "income" : ""}`}
+              className={`category-icon ${
+                e.kind === "transfer"
+                  ? "transfer"
+                  : e.direction === "income"
+                    ? "income"
+                    : ""
+              }`}
             >
-              {e.direction === "income" ? (
+              {e.kind === "transfer" ? (
+                <ArrowLeftRight size={20} />
+              ) : e.direction === "income" ? (
                 <ArrowDownLeft size={20} />
               ) : (
                 <CategoryIcon category={e.category} />
@@ -574,16 +702,31 @@ function ProfileApp() {
             </div>
             <button
               className="transaction-label"
-              onClick={() => setForm({ kind: "transaction", entry: e })}
+              onClick={() => setForm({ kind: e.kind, entry: e })}
             >
               <strong>{e.title}</strong>
               <span>
-                {e.category} <i>·</i> {e.account || "Sin cuenta"} <i>·</i>{" "}
-                {e.date.slice(8)}/{e.date.slice(5, 7)}
+                {e.category} <i>·</i>{" "}
+                {e.kind === "transfer"
+                  ? transferLabel(e)
+                  : accountLabel(e, accountNames) || "Sin cuenta"}{" "}
+                <i>·</i> {e.date.slice(8)}/{e.date.slice(5, 7)}
               </span>
             </button>
-            <strong className={e.direction === "income" ? "positive" : ""}>
-              {e.direction === "income" ? "+" : "−"}
+            <strong
+              className={
+                e.kind === "transfer"
+                  ? "neutral"
+                  : e.direction === "income"
+                    ? "positive"
+                    : ""
+              }
+            >
+              {e.kind === "transfer"
+                ? ""
+                : e.direction === "income"
+                  ? "+"
+                  : "−"}
               {fmt(e.amount)}
             </strong>
             <button
@@ -915,32 +1058,27 @@ function ProfileApp() {
                   <section className="card accounts-card">
                     <div className="section-row">
                       <h2>Tus cuentas</h2>
-                      <button
-                        className="text-button"
-                        onClick={() => setForm({ kind: "account" })}
-                      >
-                        <Plus size={16} /> Cuenta
-                      </button>
+                      <div className="section-actions">
+                        {accounts.length > 1 && (
+                          <button
+                            className="text-button"
+                            onClick={() => setForm({ kind: "transfer" })}
+                          >
+                            <ArrowLeftRight size={16} /> Transferir
+                          </button>
+                        )}
+                        <button
+                          className="text-button"
+                          onClick={() => setForm({ kind: "account" })}
+                        >
+                          <Plus size={16} /> Cuenta
+                        </button>
+                      </div>
                     </div>
                     <div className="account-grid">
                       {accounts.length ? (
-                        accounts.map((a, i) => {
-                          const balance =
-                            a.amount +
-                            live
-                              .filter(
-                                (t) =>
-                                  t.kind === "transaction" &&
-                                  t.account === a.title,
-                              )
-                              .reduce(
-                                (v, t) =>
-                                  v +
-                                  (t.direction === "income"
-                                    ? t.amount
-                                    : -t.amount),
-                                0,
-                              );
+                        accounts.map((a) => {
+                          const balance = accountBalance(a, live);
                           return (
                             <button
                               className="account"
@@ -1410,7 +1548,9 @@ function ProfileApp() {
         <Modal
           title={
             form.entry
-              ? "Editar registro"
+              ? form.kind === "transfer"
+                ? "Editar traspaso"
+                : "Editar registro"
               : form.debt
                 ? `Abonar a ${form.debt.title}`
                 : {
@@ -1418,26 +1558,43 @@ function ProfileApp() {
                     fixed: "Nuevo gasto fijo",
                     debt: "Nueva deuda",
                     account: "Nueva cuenta",
+                    transfer: "Mover dinero entre cuentas",
                   }[form.kind]
           }
           onClose={() => setForm(null)}
         >
-          <EntryForm
-            kind={form.kind}
-            entry={form.entry}
-            debt={form.debt}
-            accounts={accounts}
-            date={date}
-            entries={live}
-            categories={availableCategories}
-            onAddCategory={handleAddCategory}
-            onSave={() => {
-              setForm(null);
-              notify("Guardado en este dispositivo");
-              navigator.vibrate?.(30);
-            }}
-            onError={notify}
-          />
+          {form.kind === "transfer" ? (
+            <TransferForm
+              entry={form.entry}
+              accounts={accounts}
+              entries={live}
+              date={date}
+              hidden={prefs.hidden}
+              onSave={() => {
+                setForm(null);
+                notify("Traspaso guardado en este dispositivo");
+                navigator.vibrate?.(30);
+              }}
+              onError={notify}
+            />
+          ) : (
+            <EntryForm
+              kind={form.kind}
+              entry={form.entry}
+              debt={form.debt}
+              accounts={accounts}
+              date={date}
+              entries={live}
+              categories={availableCategories}
+              onAddCategory={handleAddCategory}
+              onSave={() => {
+                setForm(null);
+                notify("Guardado en este dispositivo");
+                navigator.vibrate?.(30);
+              }}
+              onError={notify}
+            />
+          )}
           {form.entry && (
             <button
               className="danger-button"
@@ -1446,7 +1603,9 @@ function ProfileApp() {
                 setForm(null);
               }}
             >
-              Eliminar registro
+              {form.kind === "transfer"
+                ? "Eliminar traspaso"
+                : "Eliminar registro"}
             </button>
           )}
         </Modal>
@@ -1892,12 +2051,168 @@ function ProfileApp() {
         </Modal>
       )}
       {confirmState && (
-        <ConfirmModal
-          {...confirmState}
-          onClose={() => setConfirmState(null)}
-        />
+        <ConfirmModal {...confirmState} onClose={() => setConfirmState(null)} />
       )}
     </div>
+  );
+}
+function TransferForm({
+  entry,
+  accounts,
+  entries,
+  date,
+  hidden,
+  onSave,
+  onError,
+}: {
+  entry?: Entry;
+  accounts: Entry[];
+  entries: Entry[];
+  date: string;
+  hidden: boolean;
+  onSave: () => void;
+  onError: (s: string) => void;
+}) {
+  const [amount, setAmount] = useState(entry ? String(entry.amount) : ""),
+    [fromId, setFromId] = useState(entry?.accountId || accounts[0]?.id || ""),
+    [toId, setToId] = useState(
+      entry?.toAccountId ||
+        accounts.find((a) => a.id !== (entry?.accountId || accounts[0]?.id))
+          ?.id ||
+        "",
+    ),
+    [saving, setSaving] = useState(false),
+    [errorMessage, setErrorMessage] = useState("");
+  const value = Number(amount) || 0;
+  // Al editar, el traspaso que se está cambiando ya está aplicado en los saldos:
+  // hay que sacarlo antes de simular, o se contaría dos veces.
+  const baseline = entry ? entries.filter((e) => e.id !== entry.id) : entries;
+  const preview = (account: Entry | undefined, delta: number) => {
+    if (!account) return null;
+    const current = accountBalance(account, baseline);
+    const next = round(current + delta);
+    return (
+      <span className={next < 0 ? "negative" : ""}>
+        {hidden ? "$ ••••••" : `${money(current)} → ${money(next)}`}
+      </span>
+    );
+  };
+  const from = accounts.find((a) => a.id === fromId);
+  const to = accounts.find((a) => a.id === toId);
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    try {
+      const form = new FormData(e.currentTarget);
+      await saveTransfer({
+        id: entry?.id,
+        amount: value,
+        date: String(form.get("date") || date),
+        fromId,
+        toId,
+        title: String(form.get("title") || ""),
+      });
+      onSave();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo guardar.";
+      setErrorMessage(message);
+      onError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const options = (exclude: string) =>
+    accounts
+      .filter((a) => a.id !== exclude)
+      .map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.title}
+        </option>
+      ));
+  return (
+    <form onSubmit={submit} className="entry-form">
+      <p className="muted">
+        Un traspaso mueve dinero entre tus cuentas. No cuenta como ingreso ni
+        como gasto del mes.
+      </p>
+      <label className="amount-input">
+        <span>Monto · MXN</span>
+        <div>
+          <span>$</span>
+          <input
+            aria-label="Monto"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            required
+          />
+        </div>
+      </label>
+      <div className="form-grid">
+        <label>
+          Desde
+          <select
+            value={fromId}
+            onChange={(e) => {
+              setFromId(e.target.value);
+              if (e.target.value === toId)
+                setToId(
+                  accounts.find((a) => a.id !== e.target.value)?.id || "",
+                );
+            }}
+          >
+            {options(toId)}
+          </select>
+        </label>
+        <label>
+          Hacia
+          <select value={toId} onChange={(e) => setToId(e.target.value)}>
+            {options(fromId)}
+          </select>
+        </label>
+      </div>
+      <div className="transfer-preview">
+        <span>
+          {from?.title} {preview(from, -value)}
+        </span>
+        <ArrowRight size={16} aria-hidden="true" />
+        <span>
+          {to?.title} {preview(to, value)}
+        </span>
+      </div>
+      <div className="form-grid">
+        <label>
+          Concepto (opcional)
+          <input
+            name="title"
+            maxLength={200}
+            defaultValue={entry?.title}
+            placeholder={
+              from && to ? `${from.title} → ${to.title}` : "Traspaso"
+            }
+          />
+        </label>
+        <label>
+          Fecha
+          <input
+            name="date"
+            type="date"
+            defaultValue={entry?.date || date}
+            required
+          />
+        </label>
+      </div>
+      <p className="form-error" role="alert">
+        {errorMessage}
+      </p>
+      <button className="primary full save-button" disabled={saving}>
+        <Check size={18} />
+        {saving ? "Guardando…" : "Guardar traspaso"}
+      </button>
+    </form>
   );
 }
 function EntryForm({
@@ -1934,6 +2249,11 @@ function EntryForm({
     [addingCat, setAddingCat] = useState(false),
     [newCatName, setNewCatName] = useState(""),
     [errorMessage, setErrorMessage] = useState("");
+  // El nombre guardado en el registro puede ser el que tenía la cuenta antes de
+  // renombrarla; la lista de opciones muestra los nombres actuales.
+  const currentAccountName = entry
+    ? accountLabel(entry, accountNameMap(accounts))
+    : "";
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (saving) return;
@@ -1989,6 +2309,8 @@ function EntryForm({
         )
       )
         throw new Error("Ya existe una cuenta con ese nombre.");
+      const accountName = String(f.get("account") || "");
+      const chosenAccount = accounts.find((a) => a.title === accountName);
       await db.transaction("rw", db.entries, async () => {
         await saveEntry({
           id: entry?.id,
@@ -1997,7 +2319,11 @@ function EntryForm({
           amount: kind === "debt" ? 0 : round(value),
           date: String(f.get("date") || date),
           category,
-          account: String(f.get("account") || ""),
+          account: accountName,
+          accountId:
+            kind === "transaction"
+              ? chosenAccount?.id || entry?.accountId
+              : undefined,
           direction,
           debtId: debt?.id || entry?.debtId,
           total: kind === "debt" ? total : undefined,
@@ -2005,10 +2331,22 @@ function EntryForm({
           monthly: kind === "debt" ? monthly : undefined,
         });
         if (kind === "account" && entry && entry.title !== title) {
+          // Los registros que ya apuntan a esta cuenta por identidad no
+          // necesitan tocarse; solo los anteriores a accountId, que la
+          // reconocen por nombre. De paso se les fija el identificador.
+          const now = Date.now();
           for (const t of entries.filter(
-            (t) => t.kind === "transaction" && t.account === entry.title,
+            (t) =>
+              t.kind === "transaction" &&
+              !t.accountId &&
+              t.account === entry.title,
           ))
-            await db.entries.put({ ...t, account: title, updated: Date.now() });
+            await db.entries.put({
+              ...t,
+              account: title,
+              accountId: entry.id,
+              updated: now,
+            });
         }
       });
       onSave();
@@ -2221,13 +2559,15 @@ function EntryForm({
             Cuenta
             <select
               name="account"
-              defaultValue={entry?.account || accounts[0]?.title || "Efectivo"}
+              defaultValue={
+                currentAccountName || accounts[0]?.title || "Efectivo"
+              }
             >
               {[
                 ...new Set([
                   ...accounts.map((a) => a.title),
                   "Efectivo",
-                  ...(entry?.account ? [entry.account] : []),
+                  ...(currentAccountName ? [currentAccountName] : []),
                 ]),
               ].map((a) => (
                 <option key={a}>{a}</option>

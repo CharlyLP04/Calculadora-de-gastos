@@ -2,11 +2,7 @@
   "hosting": {
     "site": "mis-finanzas-af0aa",
     "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
         "source": "!/__/**",

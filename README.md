@@ -74,8 +74,9 @@ El comando `firebase deploy` por sí solo no compila. Las reglas deben publicars
 - Fijos: compromisos mensuales prorrateados entre los días reales del mes.
 - Deudas: saldo original, abonos, cuotas y simulador sin intereses.
 - Gráficas de categorías e ingresos/gastos.
+- Traspasos entre cuentas propias: mueven saldo sin contar como ingreso ni como gasto del mes.
 - Exportación Excel, CSV, PDF y respaldo/restauración JSON del perfil activo.
-- Instalación PWA, caché de archivos y uso local sin conexión.
+- Instalación PWA, caché de archivos y uso local sin conexión. Las bibliotecas de Excel y PDF (~1.3 MB) no se precargan: se guardan la primera vez que exportas, así que esa primera exportación necesita conexión y las siguientes no.
 - WebAuthn opcional: biometría o PIN, con verificación de desafío, origen y firma. Protege la interfaz, no cifra las finanzas ni los respaldos.
 
 Balance mensual = ingresos menos gastos del mes. Saldo de cuenta = saldo inicial más su historial. Los fijos y cuotas son planificación, no cargos automáticos. El presupuesto diario reparte lo disponible después de reservar compromisos. El simulador no incluye intereses ni comisiones.

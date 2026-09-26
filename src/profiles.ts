@@ -119,4 +119,3 @@ export async function pauseCloud() {
   if (sessionProfileId)
     await registry.profiles.update(sessionProfileId, { cloudEnabled: false });
 }
-

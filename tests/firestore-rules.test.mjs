@@ -116,3 +116,46 @@ test("legacy data can only be recovered by its owner, never written by old clien
   await assertFails(getDoc(doc(other, "clara_users/ana/entries/coffee")));
   await assertFails(setDoc(doc(own, "clara_users/ana/entries/coffee"), entry));
 });
+test("profile revision only moves forward and cannot be reset by an old client", async () => {
+  const base = { name: "Personal", created: 100 };
+  await env.withSecurityRulesDisabled(async (context) =>
+    setDoc(doc(context.firestore(), root), base),
+  );
+  const db = env.authenticatedContext("ana", claims).firestore();
+  const profile = doc(db, root);
+  await assertSucceeds(setDoc(profile, { ...base, rev: 1 }));
+  await assertSucceeds(setDoc(profile, { ...base, rev: 2 }));
+  await assertSucceeds(setDoc(profile, { ...base, rev: 2 }));
+  await assertFails(setDoc(profile, { ...base, rev: 1 }));
+  await assertFails(setDoc(profile, base));
+  await assertFails(setDoc(profile, { ...base, rev: -1 }));
+  await assertFails(setDoc(profile, { ...base, rev: "3" }));
+  await assertFails(setDoc(profile, { ...base, rev: 3, created: 200 }));
+});
+test("a transfer needs two different accounts and a positive amount", async () => {
+  const db = env.authenticatedContext("ana", claims).firestore();
+  const transfer = {
+    id: "move",
+    kind: "transfer",
+    title: "Efectivo → Débito",
+    amount: 500,
+    date: "2026-09-15",
+    category: "Traspaso",
+    account: "Efectivo",
+    accountId: "acc-cash",
+    toAccountId: "acc-bank",
+    updated: 100,
+  };
+  const target = doc(db, root, "entries", "move");
+  // Los campos que faltan se omiten construyendo el objeto sin ellos: poner
+  // undefined lo rechaza el SDK en el cliente, antes de llegar a las reglas.
+  const { toAccountId, ...sinDestino } = transfer;
+  const { accountId, ...sinOrigen } = transfer;
+  await assertFails(setDoc(target, { ...transfer, toAccountId: "acc-cash" }));
+  await assertFails(setDoc(target, sinDestino));
+  await assertFails(setDoc(target, sinOrigen));
+  await assertFails(setDoc(target, { ...transfer, accountId: "" }));
+  await assertFails(setDoc(target, { ...transfer, amount: 0 }));
+  await assertSucceeds(setDoc(target, transfer));
+  await assertSucceeds(updateDoc(target, { deleted: true, updated: 101 }));
+});
