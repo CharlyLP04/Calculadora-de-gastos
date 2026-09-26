@@ -14,11 +14,13 @@ npm run build
 npm run preview
 ```
 
-Para probar las reglas de Firebase se requiere Java 21:
+Para probar las reglas de Firebase se requiere Java 21, porque el emulador de Firestore es un `.jar`:
 
 ```sh
-npx firebase emulators:exec --only firestore --project demo-clara-profiles "node --test tests/firestore-rules.test.mjs"
+npm run test:rules
 ```
+
+Sin Java el comando falla y las reglas quedan sin verificar hasta que CI las ejecute. Si no lo tienes, Temurin 21 sirve: `winget install EclipseAdoptium.Temurin.21.JDK`.
 
 La integración continua ejecuta pruebas de cálculos, aislamiento local, sincronización, reglas de Firebase, servidor opcional y compilación. Genera `clara-dist`; no despliega Hosting automáticamente.
 
